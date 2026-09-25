@@ -22,6 +22,7 @@ from sts_combat_rl.commands.t101_particle_convergence import (
     analyze_t101_formal_from_paths,
     build_parser,
     build_t101_retention_from_paths,
+    build_t101_terminal_closeout_from_paths,
     prepare_t101_canary_authorization_from_paths,
     prepare_t101_formal_authorization_from_paths,
     prepare_t101_formal_plan_from_paths,
@@ -36,6 +37,7 @@ from sts_combat_rl.sim.t101_particle_convergence import (
     T101_REQUIRED_RETENTION_ROLES,
     T101_RETENTION_ROLE_SCHEMAS,
     T101_SEED_ALGORITHM,
+    T101AdmissionExclusion,
     T101IncompleteError,
     analyze_t101_batch,
     analyze_t101_formal,
@@ -48,6 +50,7 @@ from sts_combat_rl.sim.t101_particle_convergence import (
     validate_t101_canary_ladder,
     validate_t101_formal_plan,
     validate_t101_formal_rows,
+    validate_t101_insufficient_cohort,
     validate_t101_selected_cohort,
 )
 from sts_combat_rl.sim.t101_particle_execution import (
@@ -510,6 +513,171 @@ def test_cohort_selection_retains_exclusions_and_never_backfills_strata() -> Non
     assert report["selected_counts"] == {"A": 8, "C": 8}
     assert report["exhausted_strata"] == ["B"]
     assert sum(row["stratum"] == "B" for row in report["attempted"]) == 192
+    assert validate_t101_insufficient_cohort(report) == report
+
+
+def _insufficient_cohort_with_recorded_bridge_cost() -> dict[str, object]:
+    def reject(_row: dict[str, object]) -> None:
+        raise T101AdmissionExclusion(
+            "bounded admission bridge failed",
+            bridge_call_runtime=_admission_runtime("failed_no_retry"),
+        )
+
+    return select_t101_cohort(_source(), admit=reject)
+
+
+def _write_closeout_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
+    input_path = tmp_path / "input-admission.json"
+    cohort_path = tmp_path / "cohort-admission.json"
+    authorization_path = tmp_path / "readiness-authorization.json"
+    input_admission = _admission()
+    input_path.write_text(json.dumps(input_admission), encoding="utf-8")
+    cohort_path.write_text(
+        json.dumps(_insufficient_cohort_with_recorded_bridge_cost()),
+        encoding="utf-8",
+    )
+    retained_inputs = {
+        role: {
+            "path": report["artifact"]["artifact"]["path"],
+            "schema_id": report["artifact"]["artifact"]["schema_id"],
+            "sha256": report["artifact"]["integrity"]["sha256"],
+            "size_bytes": report["artifact"]["artifact"]["size_bytes"],
+        }
+        for role, report in input_admission["artifacts"].items()
+    }
+    retained_inputs_sha256 = hashlib.sha256(
+        json.dumps(
+            retained_inputs,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    authorization_path.write_text(
+        json.dumps(
+            {
+                "schema_id": "t101-maintainer-readiness-authorization-v1",
+                "task_id": "T101",
+                "authorization_kind": "support_admission",
+                "authorized": True,
+                "authorization_id": "maintainer-ready-001",
+                "implementation_head": "c" * 40,
+                "retained_inputs_sha256": retained_inputs_sha256,
+                "maintainer_attestation": {
+                    "role": "maintainer",
+                    "decision": "READINESS_AUTHORIZED",
+                    "exact_head": "c" * 40,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return input_path, cohort_path, authorization_path
+
+
+def test_terminal_closeout_cli_publishes_support_domain_report_and_retention(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    input_path, cohort_path, authorization_path = _write_closeout_inputs(tmp_path)
+    output_root = tmp_path / "closeout"
+    result = t101_command.main(
+        [
+            "closeout",
+            "--input-admission",
+            str(input_path),
+            "--cohort-admission",
+            str(cohort_path),
+            "--readiness-authorization",
+            str(authorization_path),
+            "--implementation-head",
+            "c" * 40,
+            "--artifact-root",
+            str(output_root),
+        ]
+    )
+    assert result == 0
+    json.loads(capsys.readouterr().out)
+
+    final = json.loads((output_root / "t101-final-report.json").read_text())
+    cost = json.loads((output_root / "t101-cost-report.json").read_text())
+    retention = json.loads(
+        (output_root / "t101-terminal-retention-manifest.json").read_text()
+    )
+    assert final["terminal_classification"] == "SUPPORTED_COHORT_INSUFFICIENT"
+    assert final["support_admission_summary"]["attempted_counts"] == {
+        "A": 93,
+        "B": 192,
+        "C": 128,
+    }
+    assert final["observed_particle_proxy_values"] is False
+    assert final["convergence_evidence"]["status"] == "not_applicable"
+    assert cost["support_admission"]["bridge_calls_with_recorded_runtime"] == 413
+    assert cost["support_admission"]["summed_bridge_call_wall_clock_time_s"] == 103.25
+    assert cost["n2_to_n32_work_change"]["status"] == "not_applicable"
+    assert retention["schema_id"] == "t101-terminal-retention-manifest-v1"
+    assert retention["terminal_classification"] == "SUPPORTED_COHORT_INSUFFICIENT"
+    assert retention["not_applicable_stages"]["formal_plan"]["status"] == (
+        "not_applicable"
+    )
+    assert set(retention["artifact_references"]) == {
+        "input_admission",
+        "cohort_admission",
+        "readiness_authorization",
+        "cost_report",
+        "final_report",
+    }
+    assert all(
+        Path(reference["path"]).is_file()
+        for reference in retention["artifact_references"].values()
+    )
+    for reference in retention["artifact_references"].values():
+        artifact_bytes = Path(reference["path"]).read_bytes()
+        assert len(artifact_bytes) == reference["size_bytes"]
+        assert hashlib.sha256(artifact_bytes).hexdigest() == reference["sha256"]
+
+
+@pytest.mark.parametrize(
+    "invalid_input",
+    ["cohort_incomplete", "cohort_order", "authorization", "authorization_hash"],
+)
+def test_terminal_closeout_rejects_malformed_or_incomplete_inputs_before_writing(
+    tmp_path: Path, invalid_input: str
+) -> None:
+    input_path, cohort_path, authorization_path = _write_closeout_inputs(tmp_path)
+    if invalid_input in {"cohort_incomplete", "cohort_order"}:
+        cohort = json.loads(cohort_path.read_text())
+        if invalid_input == "cohort_incomplete":
+            cohort["attempted"].pop()
+        else:
+            cohort["attempted"][0], cohort["attempted"][93] = (
+                cohort["attempted"][93],
+                cohort["attempted"][0],
+            )
+        cohort_path.write_text(json.dumps(cohort), encoding="utf-8")
+    else:
+        authorization = json.loads(authorization_path.read_text())
+        if invalid_input == "authorization_hash":
+            authorization["retained_inputs_sha256"] = "b" * 64
+        else:
+            authorization["implementation_head"] = "d" * 40
+        authorization_path.write_text(json.dumps(authorization), encoding="utf-8")
+    output_root = tmp_path / "closeout"
+
+    with pytest.raises((T101IncompleteError, T101PathError)):
+        build_t101_terminal_closeout_from_paths(
+            input_admission_path=input_path,
+            cohort_admission_path=cohort_path,
+            readiness_authorization_path=authorization_path,
+            implementation_head="c" * 40,
+            artifact_root=output_root,
+            regeneration_commands=[
+                "python -m sts_combat_rl.commands.t101_particle_convergence closeout"
+            ],
+            retention_reason="terminal test result",
+            deletion_condition="after test consumers expire",
+        )
+    assert not output_root.exists()
 
 
 @pytest.mark.parametrize(

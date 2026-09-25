@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -39,6 +40,7 @@ from sts_combat_rl.sim.t101_particle_convergence import (
     validate_t101_formal_plan,
     validate_t101_formal_rows,
     validate_t101_input_admission,
+    validate_t101_insufficient_cohort,
     validate_t101_selected_cohort,
 )
 from sts_combat_rl.sim.t101_particle_execution import (
@@ -50,6 +52,14 @@ from sts_combat_rl.sim.t101_particle_execution import (
 
 class T101PathError(ValueError):
     """A path-bound T101 artifact was missing, mutable, or inconsistent."""
+
+
+T101_NOT_APPLICABLE_TERMINAL_STAGES = {
+    "canary_evidence": "Support admission did not produce the required 8/8/8 cohort.",
+    "formal_plan": "Canary and formal execution are not authorized without 8/8/8 support.",
+    "formal_evidence": "No formal shard was run because support admission terminated first.",
+    "convergence_analysis": "No convergence analysis exists without a supported formal cohort.",
+}
 
 
 def _read_json(path: Path, *, schema_id: str, label: str) -> dict[str, object]:
@@ -1083,6 +1093,306 @@ def build_t101_retention_from_paths(
     return {"manifest": manifest, "artifact": _write_new(output_path, manifest)}
 
 
+def _validate_terminal_readiness_authorization(
+    value: Mapping[str, object],
+    *,
+    implementation_head: str,
+    retained_inputs_sha256: str,
+) -> None:
+    expected = {
+        "schema_id": "t101-maintainer-readiness-authorization-v1",
+        "task_id": "T101",
+        "authorization_kind": "support_admission",
+        "authorized": True,
+        "authorization_id": value.get("authorization_id"),
+        "implementation_head": implementation_head,
+        "retained_inputs_sha256": retained_inputs_sha256,
+        "maintainer_attestation": {
+            "role": "maintainer",
+            "decision": "READINESS_AUTHORIZED",
+            "exact_head": implementation_head,
+        },
+    }
+    if (
+        dict(value) != expected
+        or not isinstance(value.get("authorization_id"), str)
+        or not value["authorization_id"]
+    ):
+        raise T101PathError("terminal closeout readiness authorization is invalid")
+
+
+def _retained_inputs_sha256_from_admission(inputs: Mapping[str, object]) -> str:
+    reports = inputs.get("artifacts")
+    if not isinstance(reports, Mapping):
+        raise T101PathError("input-admission artifact identities are missing")
+    retained: dict[str, dict[str, object]] = {}
+    for role, report in reports.items():
+        if not isinstance(role, str) or not isinstance(report, Mapping):
+            raise T101PathError("input-admission artifact identity is malformed")
+        qualification = report.get("artifact")
+        integrity = (
+            qualification.get("integrity")
+            if isinstance(qualification, Mapping)
+            else None
+        )
+        identity = (
+            qualification.get("artifact")
+            if isinstance(qualification, Mapping)
+            else None
+        )
+        if not isinstance(identity, Mapping) or not isinstance(integrity, Mapping):
+            raise T101PathError(f"input-admission identity is missing for {role}")
+        retained[role] = {
+            "path": identity.get("path"),
+            "schema_id": identity.get("schema_id"),
+            "sha256": integrity.get("sha256"),
+            "size_bytes": identity.get("size_bytes"),
+        }
+    return _canonical_sha256(retained)
+
+
+def _terminal_support_cost_report(
+    cohort: Mapping[str, object], *, cohort_reference: Mapping[str, object]
+) -> dict[str, object]:
+    attempts = cohort["attempted"]
+    if not isinstance(attempts, Sequence) or isinstance(attempts, (str, bytes)):
+        raise T101PathError("validated terminal cohort attempts are unavailable")
+    by_stratum: dict[str, dict[str, object]] = {}
+    total_bridge_calls = 0
+    total_missing_runtime = 0
+    total_wall_time = 0.0
+    total_admitted = 0
+    for stratum in ("A", "B", "C"):
+        rows = [
+            row
+            for row in attempts
+            if isinstance(row, Mapping) and row["stratum"] == stratum
+        ]
+        bridge_calls = [
+            row for row in rows if isinstance(row.get("bridge_call_runtime"), Mapping)
+        ]
+        wall_time = sum(
+            float(row["bridge_call_runtime"]["wall_clock_time_s"])
+            for row in bridge_calls
+        )
+        admitted = sum(row.get("admitted") is True for row in rows)
+        bridge_calls_without_runtime = sum(
+            row.get("admitted") is False and "bridge_call_runtime" not in row
+            for row in rows
+        )
+        total_bridge_calls += len(bridge_calls)
+        total_missing_runtime += bridge_calls_without_runtime
+        total_wall_time += wall_time
+        total_admitted += admitted
+        by_stratum[stratum] = {
+            "attempted_candidates": len(rows),
+            "admitted_candidates": admitted,
+            "excluded_candidates": len(rows) - admitted,
+            "bridge_calls_with_recorded_runtime": len(bridge_calls),
+            "excluded_before_bridge_call": bridge_calls_without_runtime,
+            "summed_bridge_call_wall_clock_time_s": wall_time,
+        }
+    attempts_count = len(attempts)
+    downstream = {
+        name: {"status": "not_applicable", "reason": reason}
+        for name, reason in T101_NOT_APPLICABLE_TERMINAL_STAGES.items()
+    }
+    return {
+        "schema_id": "t101-cost-report-v1",
+        "task_id": "T101",
+        "terminal_classification": "SUPPORTED_COHORT_INSUFFICIENT",
+        "support_admission": {
+            "source_artifact": dict(cohort_reference),
+            "attempted_candidates": attempts_count,
+            "admitted_candidates": total_admitted,
+            "excluded_candidates": attempts_count - total_admitted,
+            "bridge_calls_with_recorded_runtime": total_bridge_calls,
+            "excluded_before_bridge_call": total_missing_runtime,
+            "summed_bridge_call_wall_clock_time_s": total_wall_time,
+            "per_candidate_bridge_costs": (
+                "Retained on cohort_admission.attempted[].bridge_call_runtime; "
+                "this total is the sum of those recorded bridge-call durations."
+            ),
+            "per_stratum": by_stratum,
+            "overall_job_wall_clock_time_s": {
+                "status": "not_recorded_in_cohort_artifact",
+                "value": None,
+            },
+        },
+        "n2_to_n32_work_change": {
+            "status": "not_applicable",
+            "reason": T101_NOT_APPLICABLE_TERMINAL_STAGES["formal_evidence"],
+        },
+        "canary_direct_ladders": {
+            "status": "not_applicable",
+            "reason": T101_NOT_APPLICABLE_TERMINAL_STAGES["canary_evidence"],
+        },
+        "formal_shards": {
+            "status": "not_applicable",
+            "reason": T101_NOT_APPLICABLE_TERMINAL_STAGES["formal_evidence"],
+        },
+        "not_applicable_stages": downstream,
+    }
+
+
+def build_t101_terminal_closeout_from_paths(
+    *,
+    input_admission_path: Path,
+    cohort_admission_path: Path,
+    readiness_authorization_path: Path,
+    implementation_head: str,
+    artifact_root: Path,
+    regeneration_commands: Sequence[str],
+    retention_reason: str,
+    deletion_condition: str,
+) -> dict[str, object]:
+    """Publish a complete, truthful report for an exhausted insufficient cohort."""
+
+    if (
+        not isinstance(implementation_head, str)
+        or len(implementation_head) != 40
+        or any(character not in "0123456789abcdef" for character in implementation_head)
+    ):
+        raise T101PathError("terminal closeout implementation head is invalid")
+    inputs_document = _read_json(
+        input_admission_path,
+        schema_id="t101-input-admission-v1",
+        label="T101 input admission",
+    )
+    inputs = validate_t101_input_admission(inputs_document)
+    cohort = _read_json(
+        cohort_admission_path,
+        schema_id="t101-cohort-admission-v1",
+        label="T101 cohort admission",
+    )
+    validate_t101_insufficient_cohort(cohort)
+    authorization = _read_json(
+        readiness_authorization_path,
+        schema_id="t101-maintainer-readiness-authorization-v1",
+        label="T101 readiness authorization",
+    )
+    _validate_terminal_readiness_authorization(
+        authorization,
+        implementation_head=implementation_head,
+        retained_inputs_sha256=_retained_inputs_sha256_from_admission(inputs),
+    )
+    if not regeneration_commands or not all(regeneration_commands):
+        raise T101PathError("terminal closeout regeneration command is missing")
+    if not retention_reason or not deletion_condition:
+        raise T101PathError("terminal closeout retention metadata is incomplete")
+
+    root = artifact_root.resolve()
+    output_paths = {
+        "cost_report": root / "t101-cost-report.json",
+        "final_report": root / "t101-final-report.json",
+        "retention_manifest": root / "t101-terminal-retention-manifest.json",
+    }
+    existing = [name for name, path in output_paths.items() if path.exists()]
+    if existing:
+        raise T101PathError(
+            "refusing to overwrite terminal closeout outputs: " + ", ".join(existing)
+        )
+
+    input_reference = _artifact_reference(
+        input_admission_path, schema_id="t101-input-admission-v1"
+    )
+    cohort_reference = _artifact_reference(
+        cohort_admission_path, schema_id="t101-cohort-admission-v1"
+    )
+    authorization_reference = _artifact_reference(
+        readiness_authorization_path,
+        schema_id="t101-maintainer-readiness-authorization-v1",
+    )
+    cost_report = _terminal_support_cost_report(
+        cohort, cohort_reference=cohort_reference
+    )
+    cost_reference = _write_new(output_paths["cost_report"], cost_report)
+    final_report = {
+        "schema_id": "t101-final-report-v1",
+        "task_id": "T101",
+        "report_kind": "support_domain_terminal",
+        "implementation_head": implementation_head,
+        "native_identity": inputs["native_identity"],
+        "terminal_classification": "SUPPORTED_COHORT_INSUFFICIENT",
+        "scientific_result": "support_domain_result_not_convergence_evidence",
+        "input_admission": input_reference,
+        "cohort_admission": cohort_reference,
+        "readiness_authorization": authorization_reference,
+        "readiness_authorization_id": authorization["authorization_id"],
+        "support_admission_summary": {
+            "source_counts": cohort["source_counts"],
+            "attempted_counts": {
+                stratum: sum(
+                    row.get("stratum") == stratum for row in cohort["attempted"]
+                )
+                for stratum in ("A", "B", "C")
+            },
+            "selected_counts": cohort["selected_counts"],
+            "exhausted_strata": cohort["exhausted_strata"],
+        },
+        "intended_value_semantics": "strategy_fusion_mean_proxy",
+        "observed_particle_proxy_values": False,
+        "observed_cost": {
+            "cost_report": cost_reference,
+            "support_admission": cost_report["support_admission"],
+            "n2_to_n32_work_change": cost_report["n2_to_n32_work_change"],
+            "canary_direct_ladders": cost_report["canary_direct_ladders"],
+            "formal_shards": cost_report["formal_shards"],
+        },
+        "convergence_evidence": {
+            "status": "not_applicable",
+            "reason": "No supported 24-state cohort was admitted.",
+        },
+        "not_applicable_stages": {
+            name: {"status": "not_applicable", "reason": reason}
+            for name, reason in T101_NOT_APPLICABLE_TERMINAL_STAGES.items()
+        },
+        "nonclaims": [
+            "no supported 24-state cohort was produced",
+            "no canary or formal particle execution occurred",
+            "no particle-convergence or decision-stability evidence exists",
+            "no observed strategy_fusion_mean_proxy values are reported",
+            "no claim about true public-information value or a deployable controller",
+        ],
+    }
+    final_reference = _write_new(output_paths["final_report"], final_report)
+    references = {
+        "input_admission": input_reference,
+        "cohort_admission": cohort_reference,
+        "readiness_authorization": authorization_reference,
+        "cost_report": cost_reference,
+        "final_report": final_reference,
+    }
+    not_applicable = {
+        name: {"status": "not_applicable", "reason": reason}
+        for name, reason in T101_NOT_APPLICABLE_TERMINAL_STAGES.items()
+    }
+    manifest = {
+        "schema_id": "t101-terminal-retention-manifest-v1",
+        "task_id": "T101",
+        "terminal_classification": "SUPPORTED_COHORT_INSUFFICIENT",
+        "producer_provenance": {
+            "implementation_head": implementation_head,
+            "native_identity": inputs["native_identity"],
+            "readiness_authorization_sha256": authorization_reference["sha256"],
+            "input_admission_artifact_sha256": input_reference["sha256"],
+            "cohort_admission_artifact_sha256": cohort_reference["sha256"],
+        },
+        "artifact_references": references,
+        "not_applicable_stages": not_applicable,
+        "regeneration_commands": list(regeneration_commands),
+        "retention_reason": retention_reason,
+        "raw_deletion_condition": deletion_condition,
+    }
+    manifest_reference = _write_new(output_paths["retention_manifest"], manifest)
+    return {
+        "final_report": final_report,
+        "cost_report": cost_report,
+        "retention_manifest": manifest,
+        "artifacts": {**references, "retention_manifest": manifest_reference},
+    }
+
+
 def _peek_schema(path: Path) -> str:
     try:
         value = json.loads(path.resolve(strict=True).read_text(encoding="utf-8"))
@@ -1111,6 +1421,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_subparsers(dest="mode", required=True)
+    closeout = modes.add_parser(
+        "closeout",
+        help="publish the terminal report for insufficient support admission",
+    )
+    closeout.add_argument("--input-admission", type=Path, required=True)
+    closeout.add_argument("--cohort-admission", type=Path, required=True)
+    closeout.add_argument("--readiness-authorization", type=Path, required=True)
+    closeout.add_argument("--implementation-head", required=True)
+    closeout.add_argument("--artifact-root", type=Path, required=True)
+    closeout.add_argument(
+        "--retention-reason",
+        default="Retain the complete T101 insufficient-support terminal record.",
+    )
+    closeout.add_argument(
+        "--deletion-condition",
+        default="Delete only after the T101 result has no remaining audit consumers.",
+    )
     readiness = modes.add_parser("readiness")
     readiness.add_argument("--authorization", type=Path)
     readiness.add_argument("--prepare-authorization", action="store_true")
@@ -1185,7 +1512,38 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.mode == "readiness":
+        if args.mode == "closeout":
+            command = [
+                "python",
+                "-m",
+                "sts_combat_rl.commands.t101_particle_convergence",
+                "closeout",
+                "--input-admission",
+                str(args.input_admission.resolve()),
+                "--cohort-admission",
+                str(args.cohort_admission.resolve()),
+                "--readiness-authorization",
+                str(args.readiness_authorization.resolve()),
+                "--implementation-head",
+                args.implementation_head,
+                "--artifact-root",
+                str(args.artifact_root.resolve()),
+                "--retention-reason",
+                args.retention_reason,
+                "--deletion-condition",
+                args.deletion_condition,
+            ]
+            result = build_t101_terminal_closeout_from_paths(
+                input_admission_path=args.input_admission,
+                cohort_admission_path=args.cohort_admission,
+                readiness_authorization_path=args.readiness_authorization,
+                implementation_head=args.implementation_head,
+                artifact_root=args.artifact_root,
+                regeneration_commands=[shlex.join(command)],
+                retention_reason=args.retention_reason,
+                deletion_condition=args.deletion_condition,
+            )
+        elif args.mode == "readiness":
             if args.prepare_authorization == (args.authorization is not None):
                 raise T101PathError(
                     "readiness requires exactly one of --prepare-authorization or --authorization"

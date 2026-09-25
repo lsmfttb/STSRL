@@ -649,6 +649,183 @@ def validate_t101_selected_cohort(value: object) -> list[dict[str, object]]:
     return rows
 
 
+def validate_t101_insufficient_cohort(value: object) -> dict[str, object]:
+    """Validate an exhausted support-admission terminal without inventing a cohort."""
+
+    if (
+        not isinstance(value, Mapping)
+        or value.get("schema_id") != "t101-cohort-admission-v1"
+        or value.get("task_id") != T101_TASK_ID
+        or value.get("supported") is not False
+        or value.get("terminal_classification") != "SUPPORTED_COHORT_INSUFFICIENT"
+        or value.get("source_counts") != T101_SOURCE_COUNTS
+        or value.get("selection_rule")
+        != "sha256-selection-identity-then-canonical-identity-v1"
+    ):
+        raise T101IncompleteError("insufficient-support terminal identity is invalid")
+
+    raw_attempts = value.get("attempted")
+    selected = value.get("selected")
+    exhausted = value.get("exhausted_strata")
+    if (
+        not isinstance(raw_attempts, Sequence)
+        or isinstance(raw_attempts, (str, bytes))
+        or not isinstance(selected, Sequence)
+        or isinstance(selected, (str, bytes))
+        or not isinstance(exhausted, Sequence)
+        or isinstance(exhausted, (str, bytes))
+        or not raw_attempts
+    ):
+        raise T101IncompleteError("insufficient-support attempts are incomplete")
+
+    attempts_by_stratum: dict[str, list[dict[str, object]]] = {
+        name: [] for name in T101_SOURCE_COUNTS
+    }
+    observed_strata: list[str] = []
+    observed_selected: list[dict[str, object]] = []
+    identities: set[str] = set()
+    for raw in raw_attempts:
+        if not isinstance(raw, Mapping):
+            raise T101IncompleteError("cohort admission attempt is malformed")
+        identity = _identity(raw)
+        stratum = _stratum(raw)
+        if identity in identities:
+            raise T101IncompleteError("cohort admission contains duplicate identities")
+        identities.add(identity)
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        ordinal = raw.get("source_ordinal")
+        if (
+            raw.get("selection_digest") != digest
+            or isinstance(ordinal, bool)
+            or not isinstance(ordinal, int)
+            or ordinal < 0
+        ):
+            raise T101IncompleteError("cohort admission ordering evidence changed")
+        attempt = dict(raw)
+        attempts_by_stratum[stratum].append(attempt)
+        observed_strata.append(stratum)
+
+        if raw.get("admitted") is True:
+            expected_keys = {
+                "selection_identity",
+                "stratum",
+                "source_ordinal",
+                "selection_digest",
+                "admitted",
+                "structural_evidence",
+            }
+            if set(raw) != expected_keys:
+                raise T101IncompleteError("admitted attempt contains unexpected fields")
+            structural = raw.get("structural_evidence")
+            if not isinstance(structural, Mapping):
+                raise T101IncompleteError("admitted structural evidence is missing")
+            for name in (
+                "restore_exact_accepted_state",
+                "public_projection_parity",
+                "ordered_legal_action_parity",
+                "occurrence_mapping_complete",
+                "search_configuration_unchanged",
+            ):
+                if structural.get(name) is not True:
+                    raise T101IncompleteError(
+                        f"admitted structural predicate changed: {name}"
+                    )
+            report = validate_t101_bridge_report(
+                structural.get("admission_bridge_report"), particle_count=2
+            )
+            if structural.get("bridge_report_sha256") != _canonical_sha256(report):
+                raise T101IncompleteError("admission bridge evidence hash changed")
+            _validate_admission_bridge_runtime(
+                structural.get("bridge_call_runtime"), success=True
+            )
+            observed_selected.append(
+                {
+                    "selection_identity": identity,
+                    "stratum": stratum,
+                    "selection_digest": digest,
+                }
+            )
+        elif raw.get("admitted") is False:
+            expected_keys = {
+                "selection_identity",
+                "stratum",
+                "source_ordinal",
+                "selection_digest",
+                "admitted",
+                "exclusion_reason",
+            }
+            if set(raw) not in (expected_keys, expected_keys | {"bridge_call_runtime"}):
+                raise T101IncompleteError("excluded attempt contains unexpected fields")
+            if (
+                not isinstance(raw.get("exclusion_reason"), str)
+                or not raw["exclusion_reason"]
+            ):
+                raise T101IncompleteError("excluded admission reason is missing")
+            if "bridge_call_runtime" in raw:
+                _validate_admission_bridge_runtime(
+                    raw.get("bridge_call_runtime"), success=False
+                )
+        else:
+            raise T101IncompleteError("cohort admission result is ambiguous")
+
+    exhausted_strata = [
+        stratum for stratum in T101_SOURCE_COUNTS if stratum in exhausted
+    ]
+    if (
+        list(exhausted) != exhausted_strata
+        or not exhausted_strata
+        or len(set(exhausted)) != len(exhausted)
+    ):
+        raise T101IncompleteError("exhausted-strata summary is invalid")
+
+    for stratum, source_count in T101_SOURCE_COUNTS.items():
+        rows = attempts_by_stratum[stratum]
+        ordinals = [row["source_ordinal"] for row in rows]
+        if ordinals != list(range(len(rows))):
+            raise T101IncompleteError(
+                f"cohort admission skipped/reordered {stratum} candidates"
+            )
+        order_keys = [
+            (str(row["selection_digest"]), str(row["selection_identity"]))
+            for row in rows
+        ]
+        if len(rows) > source_count or order_keys != sorted(order_keys):
+            raise T101IncompleteError(
+                f"cohort admission hash order changed for {stratum}"
+            )
+        admitted_count = sum(row["admitted"] is True for row in rows)
+        if stratum in exhausted_strata:
+            if len(rows) != source_count or admitted_count >= T101_SELECTED_PER_STRATUM:
+                raise T101IncompleteError(
+                    f"exhausted {stratum} stratum was not fully attempted or insufficient"
+                )
+        elif admitted_count != T101_SELECTED_PER_STRATUM:
+            raise T101IncompleteError(
+                f"non-exhausted {stratum} stratum lacks eight admitted states"
+            )
+        elif not rows or rows[-1]["admitted"] is not True:
+            raise T101IncompleteError(
+                f"non-exhausted {stratum} stratum attempted beyond its eighth admission"
+            )
+
+    expected_strata = [
+        stratum for stratum, rows in attempts_by_stratum.items() for _row in rows
+    ]
+    if observed_strata != expected_strata:
+        raise T101IncompleteError("cohort admission stratum order changed")
+
+    expected_selected = [dict(row) for row in selected if isinstance(row, Mapping)]
+    if (
+        len(expected_selected) != len(selected)
+        or expected_selected != observed_selected
+    ):
+        raise T101IncompleteError("selected rows differ from admitted attempt order")
+    selected_counts = dict(Counter(row["stratum"] for row in observed_selected))
+    if value.get("selected_counts") != selected_counts:
+        raise T101IncompleteError("selected count summary changed")
+    return dict(value)
+
+
 def _class_partition(
     report: Mapping[str, Any],
 ) -> tuple[tuple[int, tuple[int, ...]], ...]:
@@ -1728,6 +1905,7 @@ __all__ = [
     "validate_t101_formal_plan",
     "validate_t101_formal_rows",
     "validate_t101_input_admission",
+    "validate_t101_insufficient_cohort",
     "validate_t101_native_identity",
     "validate_t101_selected_cohort",
 ]
