@@ -37,7 +37,7 @@ duplicate long experiment reports.
 | T026 | DONE | [Guidance checkpoint inference contract](T026-guidance-checkpoint-inference-contract.md) | T009, T011, T016, T018, T024 | checkpoint scorer contract |
 | T027 | DONE | [Teacher guidance calibration report](T027-teacher-guidance-calibration-report.md) | T026 | checkpoint-vs-teacher calibration |
 | T028 | DONE | [Model-guided Oracle search controller](T028-model-guided-oracle-search-controller.md) | T025, T026, T027 | versioned Oracle-like search controller |
-| T029 | DONE | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source/equal-budget comparison |
+| T029 | DONE | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source comparison |
 | T030 | DONE | [M1 model-guided search sandbox synthesis](T030-m1-model-guided-search-sandbox-synthesis.md) | T027, T029 | milestone synthesis and next task batch |
 | T031 | DONE | [A20 coverage refresh and data gap report](T031-a20-coverage-refresh-data-gap-report.md) | T030 | post-M1 A20 coverage refresh |
 | T032 | DONE | [A20 narrow teacher and checkpoint diagnostic refresh](T032-a20-teacher-checkpoint-refresh.md) | T039 | narrow source-contract diagnostic |
@@ -89,17 +89,16 @@ duplicate long experiment reports.
 | T078 | DONE | [Restored public-context fidelity repair](T078-restored-public-context-fidelity-repair.md) | T077, T076, T015, T016, T017, T020, T033 | state-160 restore fidelity repair |
 | T079 | DONE | [Battle Search state-utilization bounds recovery](T079-battle-search-state-utilization-diagnostic.md) | T078, T070, T069, T062, T052, T043, T017, T020 | conservative bounds; `AMBIGUOUS` |
 | T080 | DONE | [Battle value-target semantic alignment audit](T080-battle-value-target-semantics-audit.md) | T079, T070, T069, T062, T052, T043 | `VALUE_TARGET_SEMANTICS_UNRESOLVED` |
-| T081 | DONE | [Scientific artifact eligibility gate](T081-scientific-artifact-eligibility-gate.md) | T043, T044, T047, T048, T052, T064, T065, T070, T079 | scientific-quality artifact use boundary |
-| T082 | DONE | [Value-target repair reopening gate](T082-value-target-repair-reopening-gate.md) | T080, T081, T062 | no reopen; value target remains unresolved |
-| T083 | DONE | [Policy-only Search v2 guidance branch](T083-policy-only-search-v2-guidance-branch.md) | T081, T082, T062, T043 | policy-only guidance branch |
-| T084 | DONE | [Search-leaf value semantics repair discovery](T084-search-leaf-value-semantics-repair-discovery.md) | T080, T081, T082, T083, T062, T069 | value semantics diagnosis |
-| T085 | DONE | [Corrected leaf-value Search repair](T085-corrected-leaf-value-search-repair.md) | T084, T083, T062, T069, T043, T081 | corrected leaf-value repair and T085 evaluation |
-| T086 | DONE | [T085 failed-arm execution repair](T086-t085-failed-arm-execution-repair.md) | T085 | failed-arm execution repair |
-| T087 | DONE | [A20 fixed evaluation dataset v2](T087-a20-fixed-evaluation-dataset-v2.md) | T085, T086, T081, T078 | natural fixed-evaluation dataset v2 |
-| T088 | DONE | [Classical combat Search baseline tournament](T088-classical-combat-search-baseline-tournament.md) | T087, T085, T086, T081, T078 | `STRONGER_NONLEARNED_COMBAT_BASELINE_IDENTIFIED`; selected Search v2 @400 |
-| T089 | DONE | [Frozen Search self-generated Non-Combat policy](T089-frozen-search-self-generated-non-combat-policy.md) | T088, T040, T061 | Search v2 @400 source policy |
-| T090 | DONE | [Frozen Search Natural Exploration Prior](T090-frozen-search-natural-exploration-prior.md) | T088, T089, T040, T061 | exact categorical prior; target categories observed |
-| T091 | DONE | [Public Feature Coverage Readiness Gate](T091-public-feature-coverage-readiness-gate.md) | T011, T016, T078, T081, T087, T088, T089, T090 | `PUBLIC_FEATURE_COVERAGE_READY` |
+| T081 | DONE | [Scientific artifact eligibility gate](T081-scientific-artifact-eligibility-gate.md) | T043, T044, T047, T048, T050, T051, T052, T062, T070 | separate fail-closed integrity/eligibility gates |
+| T082 | DONE | [T064 value-target semantic closure](T082-t064-value-target-semantic-closure.md) | T080, T081, T064, T043, T042 | `VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED` |
+| T083 | DONE | [Battle Search v2 leaf-value target contract audit](T083-battle-search-v2-leaf-value-target-contract.md) | T082, T081, T064, T062, T070 | `NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED` |
+| T084 | DONE | [Search v2 internal-leaf continuation-utility target generation](T084-search-v2-internal-leaf-target-generation.md) | T083, T082, T081, T064, T062, T070 | `LEAF_CONTINUATION_UTILITY_TARGETS_READY`; 960 rows |
+| T085 | DONE | [Corrected Search v2 leaf-value repair and paired evaluation](T085-corrected-leaf-value-search-repair.md) | T084, T083, T082, T081, T064, T052, T042, T070 | `CORRECTED_VALUE_SEARCH_HARM_CONFIRMED`; bounded claim |
+| T087 | DONE | [Dense Combat outcome diagnostics and blind trace audit surface](T087-dense-combat-outcome-diagnostics.md) | T005, T012, T016, T018, T052, T078, T081, T085 | `DENSE_COMBAT_DIAGNOSTICS_READY`; diagnostic only |
+| T088 | DONE | [Classical Combat Search Baseline Tournament](T088-classical-combat-search-baseline-tournament.md) | T005, T012, T016, T018, T052, T062, T078, T081, T085, T087 | `STRONGER_NONLEARNED_COMBAT_BASELINE_IDENTIFIED`; Search v2 @400 frozen |
+| T089 | DONE | [Frozen-Search Self-Generated Non-Combat Policy Improvement](T089-frozen-search-self-generated-non-combat-policy.md) | T033, T040, T065, T075, T076, T078, T081, T085, T088 | `NON_COMBAT_POLICY_IMPROVEMENT_NOT_ESTABLISHED` |
+| T090 | DONE | [Search-v2 Action-Utility Battle Student](T090-search-v2-action-utility-battle-student.md) | T033, T062, T078, T081, T085, T087, T088 | `BATTLE_STUDENT_TARGET_COVERAGE_INSUFFICIENT` |
+| T091 | DONE | [Battle Teacher Data-Surface Density Audit](T091-battle-teacher-data-surface-density-audit.md) | T011, T016, T025, T062, T078, T081, T087, T088, T090 | `ROOT_PARTIAL_SUPERVISION_TOO_SPARSE_OR_BIASED` |
 | T092 | DONE | [Internal Search-State Teacher Data-Surface Gate](T092-internal-search-state-teacher-data-surface.md) | T011, T016, T017, T020, T025, T062, T078, T081, T087, T088, T090, T091 | `INTERNAL_SEARCH_SURFACE_DENSE_ENOUGH`; 8/8 shards |
 | T093 | DONE | [Internal-State Partial-Ranking Public Battle-Student Distillation Gate](T093-internal-state-partial-ranking-battle-student.md) | T011, T016, T025, T062, T078, T081, T087, T088, T090, T091, T092 | `INTERNAL_STATE_STUDENT_EFFECTIVE_DIVERSITY_INSUFFICIENT` |
 | T094 | DONE | [A-Cohort Supervision Attrition Decision Audit](T094-a-cohort-supervision-attrition-decision-audit.md) | T052, T085, T087, T090, T092, T093 | `A_COHORT_CANONICALIZATION_LIMITING` |
@@ -110,8 +109,22 @@ duplicate long experiment reports.
 | T099 | DONE | [Native Particle-Search Bridge Source Acceptance](T099-native-particle-search-bridge-source-acceptance.md) | T017, T020, T096, T097, T098 | `NATIVE_PARTICLE_SEARCH_BRIDGE_CAPABILITY_ACCEPTED`; pin `97f59b6` |
 | T100 | DONE | [Repository Information-Architecture Compaction](T100-repository-information-architecture-compaction.md) | T099, current governance | `REPOSITORY_INFORMATION_ARCHITECTURE_COMPACTED`; documentation only |
 | T101 | DONE | [Bounded Particle-Count Convergence and Cost Diagnostic](T101-bounded-particle-count-convergence.md) | T004, T078, T081, T087, T088, T096, T098, T099, T100 | `SUPPORTED_COHORT_INSUFFICIENT`; N=2 admission attempted all 413 candidates (A/B/C 93/192/128), admitted 0; no canary/formal run or convergence result |
-| T102 | READY | [Planner Review Routing and Maintainer Polling Protocol](T102-agent-planner-notification-protocol.md) | T100, T101, current governance | Phase B frozen from live capability discovery: role-aware exact Planner routing + durable PR decision + same-turn Maintainer polling; no restart-safe resume claim |
+| T102 | READY | [Planner Review Routing and Maintainer Polling Protocol](T102-agent-planner-notification-protocol.md) | T100, T101, current governance | governance-only; capability-grounded exact Planner routing, durable PR response, active-turn polling, recoverable idempotent resume |
 
 ## Same-ID contract and amendment files
 
-The following files are additional durable contracts or amendments, not second task lifecycles.
+The following files are additional durable contracts or amendments, not
+renumbered tasks. They remain linked here so every task-support document is
+discoverable from the archive:
+
+- T065: [agent scope documentation alignment](T065-agent-scope-documentation-alignment.md),
+  [frozen execution statistics contract](T065-frozen-execution-statistics-contract.md),
+  and [Non-Combat model input v1](T065-non-combat-model-input-v1.md).
+- T087: [legacy T085 paired-report compatibility amendment](T087-legacy-t085-paired-report-compatibility-amendment.md),
+  [minimal historical input dependency amendment](T087-minimal-historical-input-dependency-amendment.md),
+  [reproducibility amendment](T087-reproducibility-amendment.md),
+  [terminal monster-resolution semantics amendment](T087-terminal-monster-resolution-semantics-amendment.md),
+  and [terminal monster telemetry amendment](T087-terminal-monster-telemetry-amendment.md).
+
+T086 has no published task contract in this repository; the numbering gap is
+intentional historical provenance, not a missing link to invent.
