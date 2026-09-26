@@ -128,3 +128,6 @@ discoverable from the archive:
   and [terminal monster telemetry amendment](T087-terminal-monster-telemetry-amendment.md).
 - T102: [resume-operation identity amendment](T102-resume-operation-identity-amendment.md)
   and [metadata-current routing amendment](T102-route-binding-amendment.md).
+
+T086 has no published task contract in this repository; the numbering gap is
+intentional historical provenance, not a missing link to invent.
