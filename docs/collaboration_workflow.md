@@ -64,11 +64,22 @@ regime, promotion criteria, or successor science.
 For the capability-grounded Planner routing protocol, the
 [`T102 Phase-B contract`](tasks/T102-agent-planner-notification-protocol.md)
 and its same-ID [`resume-identity amendment`](tasks/T102-resume-operation-identity-amendment.md)
-are the single normative mechanics package. They own the route fields and byte
-serialization, candidate-resolution procedure, request/notification/response
-templates, polling loop, and resume-identity/completion rules. This section
-establishes the repository-wide authority and role boundaries without
-duplicating those mechanics.
+and [`active-set route-binding amendment`](tasks/T102-route-binding-amendment.md)
+are the normative mechanics package. The route-binding amendment supersedes
+the primary contract's conflicting candidate-resolution and cached-route
+clauses; the other T102 Phase-B semantics remain unchanged. For a new route
+generation, use only the ordinary unarchived `list_threads` surface. Before
+any `read_thread`, filter to ChatGPT records in the advertised STS project
+whose `updatedAt` is at or after generation activation; then make only bounded
+recent reads and require the exact current assistant-authored canonical
+assertion/hash. Do not enumerate archived or historical conversations. Exactly
+one match is required; zero, multiple, or decision-preventing read failures
+fail closed without widening the candidate set. The Phase-A-proven endpoint
+may be validated directly for the existing Planner. After binding, each send
+rechecks the PR/active advertisement and ordinary current list, then reads only
+the bound thread. A changed or invalid route fails closed and requires explicit
+fresh-generation/recovery. This section establishes the repository-wide
+authority and role boundaries without duplicating the remaining T102 mechanics.
 
 Use this protocol only after the Maintainer has verified the Implementer result
 and classified the next action as Planner-owned. Routine Implementer completion,

@@ -214,7 +214,17 @@ rules in [`collaboration_workflow.md`](collaboration_workflow.md) and the
 copyable templates and exact mechanics in the normative T102 protocol package:
 [`T102 Phase-B contract`](tasks/T102-agent-planner-notification-protocol.md)
 and its same-ID
-[`resume-identity amendment`](tasks/T102-resume-operation-identity-amendment.md).
+[`resume-identity amendment`](tasks/T102-resume-operation-identity-amendment.md)
+and [`active-set route-binding amendment`](tasks/T102-route-binding-amendment.md).
+The route amendment is authoritative over conflicting primary-contract route
+discovery/cache clauses: do not inspect archived/history conversations; filter
+the ordinary unarchived thread list to ChatGPT in the advertised STS project
+and `updatedAt` at or after generation activation before bounded recent reads;
+require exactly one exact assistant-authored assertion/hash match. Zero,
+multiple, or read-ambiguous candidates fail closed without widening. The
+Phase-A-proven endpoint may be validated directly. Once bound, validate the PR,
+advertisement, and current list, then read only the bound thread for each send;
+invalid routing requires explicit fresh-generation/recovery.
 Do this only after
 independent Implementer-result verification and classification; do not notify
 Planner merely because an Implementer finished or a routine check failed.

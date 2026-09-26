@@ -224,7 +224,16 @@ authoritative source and overrides shorter summaries elsewhere.
   authorized workflow before returning to the user.
 - After verifying Implementer work, route only genuine Planner-owned actions
   through the durable PR request and the T102 protocol package linked from
-  [`docs/collaboration_workflow.md`](docs/collaboration_workflow.md). Chat is
+  [`docs/collaboration_workflow.md`](docs/collaboration_workflow.md), including
+  its [active-set route-binding amendment](docs/tasks/T102-route-binding-amendment.md).
+  Route only through the ordinary unarchived thread list: before reading, filter
+  to ChatGPT records in the advertised STS project with `updatedAt` at or after
+  generation activation, then use bounded recent reads and require the exact
+  assistant-authored assertion/hash. Never scan archived/history threads or
+  widen after zero, multiple, or read-ambiguous matches; the Phase-A-proven
+  endpoint may instead be validated directly. After binding, recheck the PR,
+  advertisement, and current list, then read only the bound thread before send.
+  Invalid routes require explicit fresh-generation/recovery. Chat is
   notification-only; use bounded active-turn PR polling, and resume only with
   durable completion evidence. Manual fallback remains required when routing or
   completion is ambiguous; do not claim restart-safe recovery.
