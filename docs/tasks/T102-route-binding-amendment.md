@@ -1,272 +1,236 @@
-# T102 Amendment: Active-Set Planner Route Binding
+# T102 Amendment: Metadata-Current Planner Routing
 
 Artifact Eligibility Required: false
 
 This is a same-ID normative amendment to
 `T102-agent-planner-notification-protocol.md`.
 
-It supersedes the parts of **Resolving The Current Planner**, **Cached route**,
-and the prior version of this amendment that require or permit widening route
-discovery to the full visible/archived conversation history.
+It supersedes all T102 routing requirements that depend on:
 
-All other T102 Phase-B semantics remain unchanged.
+- `PLANNER_ROUTE_ASSERTION` content;
+- assertion hashes or canonical assertion bytes;
+- route generations or route tokens;
+- `PLANNER_ROUTE_ADVERTISEMENT` for endpoint selection;
+- `PLANNER_ROUTE_BINDING` as a persistent selected endpoint;
+- `read_thread` for Planner discovery or route validation; or
+- content/history search to decide which Planner conversation is current.
 
-## Core Rule
+Those earlier mechanisms remain historical T102 design/canary evidence only.
+They are not part of the current routing contract.
 
-**Planner routing is resolved from the current active STS working set, never
-from the user's accumulated conversation history.**
+All non-routing T102 semantics remain unchanged, including durable PR request
+identity, notification-not-authority, exact-head Planner verification, durable
+Planner PR response, Maintainer polling/resume, and resume-operation
+idempotency.
 
-A current Planner is expected to be:
+## Core Model
 
-- an unarchived current ChatGPT conversation;
-- in the STS project used by the live Planner workflow;
-- freshly active for the newly published route generation; and
-- explicitly claiming that exact generation through the canonical
-  assistant-authored route assertion.
+**The current Planner is a current STS ChatGPT work conversation, not a piece of
+text hidden somewhere in conversation history.**
 
-A conversation that does not satisfy those currentness conditions is not a
-Planner candidate, even if old Planner/task text appears somewhere in its
-history.
+The demonstrated Codex thread-list metadata already exposes the information
+needed for routing:
 
-`list_archived_threads` MUST NOT be used for Planner routing or uniqueness
-proof. Archived conversations are historical/inactive by definition for this
-protocol. If the intended Planner has been archived, automatic routing fails
-closed until an active Planner publishes a new generation.
+- exact thread id;
+- `kind`;
+- `projectId`;
+- current/unarchived membership through the ordinary `list_threads` surface;
+- `updatedAt`.
 
-T102 never falls back from current active candidates to archived or arbitrary
-historical conversations.
+T102 therefore treats Planner routing as a metadata-currentness problem.
+Conversation content is not needed to route a notification.
 
-## Route Generation Activation
+For the currently demonstrated STS Planner domain, the exact project id is:
 
-A deliberate current Planner or replacement Planner activates a generation in
-this order:
+`g-p-6a9985b51f44819186f65b74fe8af5da`
 
-1. choose a fresh monotonically increasing `route_generation` and high-entropy
-   `route_token`;
-2. compute the canonical route assertion/hash under the primary T102 byte
-   rules;
-3. post one PR `PLANNER_ROUTE_ADVERTISEMENT` containing at least:
+A future change of the STS Planner project id is a routing-domain change and
+requires an explicit workflow/task amendment before automatic routing uses the
+new project.
 
-```text
-PLANNER_ROUTE_ADVERTISEMENT
-protocol_version: agent-planner-review-v1
-repository: <owner/repo>
-task: <Txxx>
-pull_request: <number>
-route_generation: <generation>
-route_token: <token>
-planner_project_id: <STS project id>
-assertion_sha256: <sha256>
-status: ACTIVE
-supersedes: <prior advertisement id or none>
-```
+## STS Project Role Invariant
 
-4. only **after GitHub has created that advertisement comment**, emit the exact
-   canonical `PLANNER_ROUTE_ASSERTION` as an assistant-authored message in the
-   intended current Planner conversation.
+T102 relies on this project-level invariant:
 
-The GitHub advertisement comment's server `created_at` timestamp is the
-`generation_activated_at` lower bound for candidate activity.
+> Ordinary unarchived `kind=chatgpt` conversations in the STS project are
+> Planner-capable user-facing work conversations for this workflow.
 
-For the currently demonstrated STS Planner project, Phase A observed project id
-`g-p-6a9985b51f44819186f65b74fe8af5da`. A later change of Planner project is a
-routing-domain change and requires explicit Planner amendment/recovery; do not
-silently search other projects.
+Main Maintainer / Task Implementer execution conversations are not selected by
+this rule because their thread kind/project surface is different from the STS
+Planner ChatGPT surface demonstrated in Phase A.
 
-The advertisement is transient routing metadata only. It is not Planner
-approval, specification authority, or merge authority.
+If the STS project is later used to host ordinary unarchived ChatGPT
+conversations that must **not** be Planner-capable, this invariant no longer
+holds and T102 routing must be amended before relying on metadata-current
+selection. Do not silently reintroduce title/content heuristics.
 
-## Eligible Candidate Set
+## Current Planner Selection
 
-When a new active generation has no valid binding, Main Maintainer performs a
-**bounded active-set discovery**, not a history scan.
+Immediately before **every** direct Planner notification, Main Maintainer:
 
-It calls only the ordinary current-thread listing surface demonstrated in Phase
-A (`list_threads` at its supported maximum). It MUST NOT call
-`list_archived_threads` for route discovery.
+1. calls the ordinary current `list_threads` surface demonstrated in Phase A;
+2. does **not** call `list_archived_threads`;
+3. filters records to all of:
+   - `kind == chatgpt`;
+   - `projectId == g-p-6a9985b51f44819186f65b74fe8af5da`;
+   - present in the ordinary current/unarchived listing;
+4. compares only thread-list metadata and finds the maximum `updatedAt` among
+   the eligible records;
+5. requires that the maximum identify exactly one thread;
+6. sends the compact notification only to that exact thread id using the
+   demonstrated exact-thread send operation.
 
-Before any `read_thread`, discard every record that does not satisfy all of:
+No `read_thread` is required or permitted for route selection.
 
-1. `kind == chatgpt`;
-2. `projectId == planner_project_id` from the active advertisement;
-3. the record is present in the ordinary unarchived `list_threads` result;
-4. `updatedAt >= generation_activated_at`.
+No title, preview, summary, task text, role word, assertion, nonce, hash, or old
+message content participates in current-Planner selection.
 
-Title, preview, summary, generic words such as "Planner", and old task text are
-not routing authority and MUST NOT widen the candidate set.
+### Fail-closed cases
 
-The temporal rule is intentional: because the protocol requires the route
-assertion to be emitted only after the advertisement exists, a conversation
-whose last activity predates generation activation cannot contain the current
-generation assertion and cannot be the newly activated Planner.
+Automatic routing stops and requires explicit user/Planner recovery when:
 
-A newly activated Planner should therefore appear near the recent end of the
-current STS project working set even if the account contains years of unrelated
-conversation history.
+- there are zero eligible current STS ChatGPT threads;
+- the maximum `updatedAt` cannot be resolved to exactly one eligible thread;
+- required thread-list metadata is missing or malformed;
+- the selected exact-thread send reports failure; or
+- the STS project-id invariant is known to have changed.
 
-## Candidate Verification
+Fail closed does **not** mean widening the search to:
 
-Maintainer `read_thread`s only the eligible candidates above.
+- archived threads;
+- another project;
+- older conversation history;
+- title/summary matching; or
+- content/assertion search.
 
-Reads must be bounded to recent turns sufficient to inspect post-activation
-`agentMessage` content. Do not paginate into pre-activation/full conversation
-history merely to search for routing text. If the exact current assertion is
-not present in the bounded recent content, that candidate does not match.
+## Why Latest `updatedAt` Is The Handoff Signal
 
-A candidate matches only when:
+The user changes the operational Planner by interacting with a different STS
+Planner conversation.
 
-- the exact canonical current-generation `PLANNER_ROUTE_ASSERTION` occurs in an
-  `agentMessage`;
-- repository/task/PR/generation/token/status fields match the PR advertisement;
-- canonicalization reproduces `assertion_sha256`.
+That interaction updates the new conversation's `updatedAt`. On the next
+Planner-actionable notification, Maintainer re-lists current STS ChatGPT
+threads and naturally selects the newly active conversation.
 
-Exactly one eligible candidate must match.
+Therefore Planner replacement does not require a separate route-generation
+protocol or a durable thread binding.
 
-- one match -> create the route binding;
-- zero matches -> fail closed;
-- more than one match -> fail closed as a duplicate/branched Planner ambiguity;
-- a read failure that prevents deciding among otherwise eligible candidates ->
-  fail closed.
+This also handles the common duplicate/network-branch case proportionally:
+when more than one STS Planner branch exists, the branch the user continues to
+use becomes the most recently updated current branch. If metadata cannot
+produce a unique latest branch, the protocol fails closed rather than guessing.
 
-**Fail closed means stop automatic routing and require explicit Planner/user
-recovery or a fresh superseding generation. It does not mean search archived
-threads, other projects, older conversations, or broader history.**
+Archiving provides an even stronger lifecycle signal: once a former Planner
+conversation is archived, it is outside the ordinary current candidate surface
+and can never be selected by T102 routing.
 
-This protocol intentionally proves uniqueness only inside the semantically
-eligible current working set exposed by the demonstrated tools. It does not
-claim absence of hidden or historical copies of route text, because those are
-not eligible current Planners.
+## No Durable Route Binding
 
-## Phase-A Bootstrap For The Existing Planner
+T102 intentionally does not persist a normal-path Planner thread id in a
+`PLANNER_ROUTE_BINDING` record.
 
-Phase A already live-proved the current Planner endpoint:
+The metadata lookup is cheap and re-running it before every direct delivery has
+an important semantic benefit: endpoint replacement is detected through normal
+currentness rather than through a stale cache plus invalidation machinery.
 
-- thread id: `6aae4d69-bf5c-83e9-bc4f-492ea1086dcb`;
-- kind: `chatgpt`;
-- project id: `g-p-6a9985b51f44819186f65b74fe8af5da`;
-- exact-thread send woke the idle conversation and produced the durable ACK in
-  PR comment `5842971509`.
+A caller may hold the selected thread id only for the duration of one concrete
+send attempt.
 
-For the existing Planner generation, Maintainer may validate this exact
-Phase-A-proven endpoint directly against the latest active advertisement and
-current canonical assertion instead of rediscovering it.
+Before a later distinct notification, it must re-run current Planner selection.
 
-If the proven endpoint no longer validates, do not scan historical/archived
-threads. Publish/recover a fresh generation under the active-set procedure.
+If a send fails and the sender chooses to retry, it may perform one fresh
+metadata selection and resend the **same durable notification id**. Retry must
+not create another PR review-request comment solely because the endpoint
+changed.
 
-## Durable Route Binding
+## Relationship To Durable Review Requests
 
-After exactly one eligible candidate is verified, Main Maintainer posts:
+Endpoint selection answers only:
 
-```text
-PLANNER_ROUTE_BINDING
-protocol_version: agent-planner-review-v1
-repository: <owner/repo>
-task: <Txxx>
-pull_request: <number>
-route_generation: <generation>
-route_token: <token>
-planner_project_id: <project id>
-assertion_sha256: <sha256>
-thread_id: <exact non-secret ChatGPT thread id>
-status: BOUND
-```
+> Which current STS Planner conversation should be notified?
 
-The binding is routing metadata only. It is not Planner identity in a
-cryptographic sense, approval, lifecycle authority, or a credential.
+It does not answer:
 
-At most one unsuperseded `BOUND` record may exist for one active generation.
-Multiple/conflicting bindings fail closed.
+> Has Planner approved anything?
 
-## Bound-Route Validation Before Ordinary Send
+Before direct delivery, Maintainer still posts the durable PR review-request
+comment required by the primary T102 contract. Its GitHub comment id remains
+the notification/idempotency identity.
 
-Once a generation is bound, normal sends do not rediscover candidates.
+The direct thread message remains a compact wakeup pointer to that durable PR
+request. It grants no specification approval, implementation authorization,
+final acceptance, scientific authority, or merge authority.
 
-Before every direct send Maintainer:
+The receiving Planner independently fetches and verifies repository/PR/exact
+head evidence before recording any authoritative decision.
 
-1. re-reads the PR and latest active `PLANNER_ROUTE_ADVERTISEMENT`;
-2. invalidates the binding on any generation/token/project/hash/supersession
-   change;
-3. checks the bound thread still appears in the ordinary unarchived
-   `list_threads` current surface with the expected `kind` and `projectId`;
-4. `read_thread`s only the bound thread using a bounded recent-turn read;
-5. verifies the exact current canonical assertion remains in an `agentMessage`;
-6. sends only to that exact bound `thread_id`.
+## Planner Response And Maintainer Resume
 
-No other conversation content is read on the normal path.
+This amendment does not add Planner -> Maintainer push.
 
-If bound validation fails, automatic delivery fails closed and requires an
-explicit fresh generation/recovery. It MUST NOT trigger a full-account or
-archived-history scan.
+Planner records its authoritative response durably on the PR.
 
-## Planner Replacement / Handoff
+The requesting Maintainer remains in the demonstrated same-active-turn bounded
+wait/poll path and resumes only after observing and validating the matching
+durable Planner response.
 
-A deliberate Planner replacement is cheap and explicit; it does not search for
-"the new Planner" across history.
+The resume-operation identity/idempotency amendment remains fully applicable.
 
-The replacement Planner:
+T102 still does not claim restart-safe unattended recovery after a Maintainer
+turn/session has terminated.
 
-1. posts a superseding advertisement with a fresh generation/token and the same
-   STS `planner_project_id`;
-2. after the advertisement exists, emits the corresponding canonical assertion
-   in its own conversation.
+## Archived Conversations
 
-Maintainer then:
+`list_archived_threads` is forbidden for T102 Planner routing.
 
-1. sees the generation change on the PR and discards the old binding;
-2. calls `list_threads` once;
-3. filters to unarchived ChatGPT conversations in the STS project whose
-   `updatedAt` is at/after generation activation;
-4. reads only those eligible recent candidates;
-5. requires exactly one canonical assertion match and binds it.
+An archived conversation is retained history, not a current work endpoint.
+Searching archived threads would both contradict that lifecycle signal and make
+routing cost/error surface grow with project age.
 
-Thus replacement cost depends on the tiny set of **currently active STS project
-conversations since the handoff**, not on total account history and not on the
-number of old Planners.
+The number or length of archived conversations must have zero effect on normal
+T102 routing cost.
 
-A silent replacement with no superseding advertisement/assertion remains
-outside T102's automatic guarantees.
+## Historical Assertion/Generation Records
 
-## Why Archived Threads Are Excluded
+Earlier T102 PR comments containing `PLANNER_RENDEZVOUS`,
+`PLANNER_ROUTE_ADVERTISEMENT`, `PLANNER_ROUTE_ASSERTION`, route tokens,
+assertion hashes, or bindings are retained only as historical design/canary
+records.
 
-Archiving is an explicit lifecycle signal that a conversation is no longer in
-the ordinary current working set. An archived former Planner can contain exact
-old task text, old assertions, and long histories, but none of that makes it the
-current Planner.
-
-Reading archived conversations for routing would:
-
-- make cost grow monotonically with project age;
-- increase false/duplicate matches from obsolete Planner generations;
-- consume large irrelevant histories;
-- weaken the semantic distinction between current work and retained history.
-
-Accordingly, archived conversations are retained evidence/history only and are
-never routing candidates under T102.
+They must not override the metadata-current selection rule in this amendment
+and must not be consulted to choose the current Planner endpoint.
 
 ## Verification
 
-Implementation/live canary must prove:
+Implementation and the live canary must prove at least:
 
-1. route discovery never calls `list_archived_threads`;
-2. irrelevant current threads from other projects and non-ChatGPT kinds are
-   filtered before any `read_thread`;
-3. current STS threads whose `updatedAt` predates generation activation are
-   filtered before any `read_thread`;
-4. a fresh handoff generation reads only the remaining eligible current
-   candidates and binds exactly one canonical assertion match;
-5. zero/multiple eligible matches fail closed without widening search scope;
-6. Phase-A-proven bootstrap can bind the existing Planner by validating only
-   its exact known thread;
-7. a second send in one generation reads only PR/current-list metadata and the
-   bound thread, not unrelated conversations;
-8. generation supersession invalidates the old binding and discovers the new
-   Planner from the fresh active-set window only;
-9. a bound thread becoming unavailable/archived/mismatched fails closed rather
-   than triggering historical discovery;
-10. no route advertisement/binding field is treated as Planner approval or
-    merge authority.
+1. Planner routing calls ordinary current `list_threads` but never
+   `list_archived_threads`;
+2. routing does not call `read_thread` for discovery/identity verification;
+3. non-ChatGPT and other-project records are eliminated using metadata only;
+4. among eligible current STS ChatGPT records, the unique maximum `updatedAt`
+   thread is selected;
+5. zero eligible records and non-unique/ambiguous maximum-currentness fail
+   closed without content/history fallback;
+6. direct delivery uses only the selected exact thread id and the durable PR
+   notification id;
+7. a later notification re-runs metadata selection rather than trusting a
+   durable/cached Planner binding;
+8. when another STS Planner conversation becomes more recently updated, the
+   next selection chooses that conversation without scanning old content;
+9. an archived former Planner is never considered;
+10. duplicate transport delivery reuses the same durable notification id;
+11. the direct notification remains non-authoritative and Planner authority is
+    derived only from independently verified durable PR evidence;
+12. Maintainer can remain in the approved bounded polling path, observe the
+    matching durable Planner response, and resume without user relay.
+
+The live canary does not need to manufacture a second Planner conversation if
+that is operationally inconvenient. The implementation must at minimum test
+the replacement selection rule with metadata fixtures, while the live canary
+must prove metadata-only selection of the actual current Planner, exact-thread
+wake delivery, durable PR response, and Maintainer poll/resume.
 
 Before final landing this amendment must either be folded into the primary T102
-protocol document or be durably linked from the archive's T102 same-ID amendment
-lookup.
+protocol document or remain durably linked from the archive's T102 same-ID
+amendment lookup.
