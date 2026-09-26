@@ -109,6 +109,7 @@ duplicate long experiment reports.
 | T099 | DONE | [Native Particle-Search Bridge Source Acceptance](T099-native-particle-search-bridge-source-acceptance.md) | T017, T020, T096, T097, T098 | `NATIVE_PARTICLE_SEARCH_BRIDGE_CAPABILITY_ACCEPTED`; pin `97f59b6` |
 | T100 | DONE | [Repository Information-Architecture Compaction](T100-repository-information-architecture-compaction.md) | T099, current governance | `REPOSITORY_INFORMATION_ARCHITECTURE_COMPACTED`; documentation only |
 | T101 | DONE | [Bounded Particle-Count Convergence and Cost Diagnostic](T101-bounded-particle-count-convergence.md) | T004, T078, T081, T087, T088, T096, T098, T099, T100 | `SUPPORTED_COHORT_INSUFFICIENT`; N=2 admission attempted all 413 candidates (A/B/C 93/192/128), admitted 0; no canary/formal run or convergence result |
+| T102 | DONE | [Metadata-Current Planner Routing and Maintainer Polling Protocol](T102-agent-planner-notification-protocol.md) | T100, T101, current governance | `AGENT_PLANNER_REVIEW_ROUTING_ESTABLISHED`; metadata-current selection, durable PR response, active-turn polling, idempotent resume; no restart-safe recovery claim |
 
 ## Same-ID contract and amendment files
 
@@ -124,6 +125,8 @@ discoverable from the archive:
   [reproducibility amendment](T087-reproducibility-amendment.md),
   [terminal monster-resolution semantics amendment](T087-terminal-monster-resolution-semantics-amendment.md),
   and [terminal monster telemetry amendment](T087-terminal-monster-telemetry-amendment.md).
+- T102: [resume-operation identity amendment](T102-resume-operation-identity-amendment.md)
+  and [metadata-current routing amendment](T102-route-binding-amendment.md).
 
 T086 has no published task contract in this repository; the numbering gap is
 intentional historical provenance, not a missing link to invent.

@@ -209,6 +209,43 @@ Maintainer's task. In the same workflow, the Main Maintainer must:
 6. return a final user update only after no immediate authorized Maintainer
    action remains.
 
+If that next action is Planner-owned, use the routing and decision-authority
+rules in [`collaboration_workflow.md`](collaboration_workflow.md) and the
+copyable templates and exact mechanics in the normative T102 protocol package:
+[`T102 Phase-B contract`](tasks/T102-agent-planner-notification-protocol.md)
+and its same-ID
+[`resume-identity amendment`](tasks/T102-resume-operation-identity-amendment.md)
+and [`metadata-current routing amendment`](tasks/T102-route-binding-amendment.md).
+The routing amendment supersedes the primary contract's assertion/generation/
+binding-based route-selection and route-related canary prose; non-routing T102
+semantics remain unchanged. Immediately before each distinct direct
+notification, use ordinary unarchived `list_threads` only, filter to
+`kind=chatgpt` and `projectId` equal to the exact STS project
+`g-p-6a9985b51f44819186f65b74fe8af5da`, then select the unique eligible thread
+with maximum `updatedAt`. Missing/malformed metadata, zero eligible threads,
+tied maximum, or send failure are fail-closed cases. Do not call
+`list_archived_threads` or `read_thread` for routing, search title/content/
+assertions, use generations, or retain a cached/persistent binding. Send only
+to the selected exact thread id. A send failure has no fallback route; if
+retrying, perform one fresh metadata selection and reuse the same durable
+notification id. Re-resolve again before every later distinct send.
+Do this only after
+independent Implementer-result verification and classification; do not notify
+Planner merely because an Implementer finished or a routine check failed.
+Create the durable exact-head PR request before direct delivery, then remain in
+the same active turn for bounded, task-specific PR polling. Chat delivery is
+not a decision receipt, and a detached-job heartbeat is not the wait mechanism
+for ordinary Planner review.
+
+Before automatically continuing after a Planner decision, verify the exact
+request/head correlation and follow the T102 recoverable-resume rule: retries
+require an idempotent action or a durable completion predicate bound to the
+stable action identity; publish a completed ACK only after that predicate is
+true. If route resolution or completion cannot be proved, stale state is
+observed, or the Maintainer turn has ended, stop automatic handling and use the
+documented manual/user recovery path. T102 does not promise restart-safe or
+exactly-once recovery.
+
 Do not return to the user with only “Implementer finished” when the receipt
 contains a commit, PR, artifact, test result, or explicit next step that the
 Maintainer can safely process. Conversely, do not continue into a scientific

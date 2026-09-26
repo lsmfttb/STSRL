@@ -222,6 +222,23 @@ authoritative source and overrides shorter summaries elsewhere.
   a wait timeout is not completion, an empty thread projection is not proof of
   no work, and the Maintainer must read/verify the result and continue the
   authorized workflow before returning to the user.
+- After verifying Implementer work, route only genuine Planner-owned actions
+  through the durable PR request and the T102 protocol package linked from
+  [`docs/collaboration_workflow.md`](docs/collaboration_workflow.md), including
+  its [metadata-current routing amendment](docs/tasks/T102-route-binding-amendment.md).
+  Immediately before each distinct direct notification, use ordinary unarchived
+  `list_threads` only, filter to `kind=chatgpt` and `projectId` equal to
+  `g-p-6a9985b51f44819186f65b74fe8af5da`, then send to the unique eligible
+  thread with maximum `updatedAt`. Fail closed on missing/malformed metadata,
+  zero eligible threads, a tied maximum, or send failure. For routing, do not
+  call `list_archived_threads` or `read_thread`, search titles/content/assertions,
+  use route generations, or retain a persistent/cached endpoint binding. Send
+  only to the selected exact thread id. A send failure has no fallback route;
+  if retrying, perform one fresh metadata selection and reuse the same durable
+  notification id. Chat remains notification-only; use bounded active-turn PR
+  polling and resume only with durable completion evidence. Manual recovery
+  remains required when routing or completion is ambiguous; do not claim
+  restart-safe recovery.
 - One task uses one fresh branch and one pull request based on latest `main`.
 - A ready-for-review pull request must satisfy the task's published
   deliverables, required artifacts, verification, and acceptance criteria.

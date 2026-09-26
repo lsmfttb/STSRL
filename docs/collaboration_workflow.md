@@ -59,6 +59,54 @@ Maintainer may choose ordinary execution bindings that do not change task meanin
 Maintainer does not invent scientific semantics, acceptance meaning, information
 regime, promotion criteria, or successor science.
 
+### Planner Review Routing, Polling, And Resume
+
+For the capability-grounded Planner routing protocol, the
+[`T102 Phase-B contract`](tasks/T102-agent-planner-notification-protocol.md)
+and its same-ID [`resume-identity amendment`](tasks/T102-resume-operation-identity-amendment.md)
+and [`metadata-current routing amendment`](tasks/T102-route-binding-amendment.md)
+are the normative mechanics package. The routing amendment supersedes the
+primary contract's assertion/generation/binding-based route-selection and
+route-related canary prose; all non-routing T102 semantics remain unchanged.
+Immediately before every distinct direct notification, use only ordinary
+unarchived `list_threads`, filter to `kind=chatgpt` and `projectId` equal to the
+exact STS project `g-p-6a9985b51f44819186f65b74fe8af5da`, and select the unique
+eligible thread with maximum `updatedAt`. Missing or malformed metadata, no
+eligible threads, a tied maximum, and send failure fail closed without
+widening the search. Do not call `list_archived_threads` or `read_thread` for
+routing, search title or content, use assertions/generations, or retain a route
+binding. Resolve again before each later distinct send and send only to the
+selected exact thread id. A send failure has no fallback route; if retrying,
+perform one fresh metadata selection and reuse the same durable notification id.
+This section establishes the repository-wide authority and role boundaries
+without duplicating the remaining T102 mechanics.
+
+Use this protocol only after the Maintainer has verified the Implementer result
+and classified the next action as Planner-owned. Routine Implementer completion,
+ordinary test failures, progress updates, and other Maintainer-owned execution
+do not trigger Planner notifications. The Maintainer first records a durable,
+exact-head review request on the task PR, then resolves and notifies one current
+Planner route using the T102 procedure. Direct conversation is compact transport
+only; it cannot approve a specification, authorize work, accept a result, or
+authorize landing. Planner decisions and their exact-head/request correlation
+must be durable on the PR before Maintainer action.
+
+After delivery, the Maintainer remains in the same active turn and uses a
+task-specific bounded sleep/poll loop to reread PR head and comments. There is
+no repository-wide polling interval or wait-budget default. A stale exact-head
+request stops for re-review. Each distinct later notification independently
+resolves the current thread from list metadata; do not retain a route binding.
+Do not turn an ordinary Planner wait into a detached-job heartbeat.
+
+Automatic follow-up is allowed only when the action has a stable operation
+identity and completion is idempotent or durably observable before retry. Check
+the completion predicate before performing or retrying the action, and record a
+completed response ACK only after durable completion evidence exists. This is
+not exactly-once transport or restart-safe Maintainer recovery. If routing,
+correlation, completion evidence, or the active turn is unavailable, fail closed
+and use explicit/manual recovery; never infer that a chat send or an ACK proves
+an unobserved action completed.
+
 ### Task Implementer
 
 After Maintainer records exact-spec `SPEC APPROVED` with
