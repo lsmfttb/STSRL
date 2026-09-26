@@ -694,8 +694,9 @@ removed manual relay.
 Before final acceptance, exercise the proposed transport in a
 **non-authoritative protocol canary**:
 
-1. a Maintainer-side Agent publishes/resolves a task-scoped Planner rendezvous;
-2. it route-probes and sends a canary request carrying a resumable return route;
+1. Planner publishes a non-authoritative canary rendezvous on the T102 PR;
+2. a Maintainer-side Agent re-resolves that rendezvous, route-probes it, and
+   sends a canary request carrying a resumable return route;
 3. the intended Planner conversation receives it without user relay;
 4. Planner posts a harmless canary response record and sends the response
    notification to the exact requester route;
