@@ -225,18 +225,20 @@ authoritative source and overrides shorter summaries elsewhere.
 - After verifying Implementer work, route only genuine Planner-owned actions
   through the durable PR request and the T102 protocol package linked from
   [`docs/collaboration_workflow.md`](docs/collaboration_workflow.md), including
-  its [active-set route-binding amendment](docs/tasks/T102-route-binding-amendment.md).
-  Route only through the ordinary unarchived thread list: before reading, filter
-  to ChatGPT records in the advertised STS project with `updatedAt` at or after
-  generation activation, then use bounded recent reads and require the exact
-  assistant-authored assertion/hash. Never scan archived/history threads or
-  widen after zero, multiple, or read-ambiguous matches; the Phase-A-proven
-  endpoint may instead be validated directly. After binding, recheck the PR,
-  advertisement, and current list, then read only the bound thread before send.
-  Invalid routes require explicit fresh-generation/recovery. Chat is
-  notification-only; use bounded active-turn PR polling, and resume only with
-  durable completion evidence. Manual fallback remains required when routing or
-  completion is ambiguous; do not claim restart-safe recovery.
+  its [metadata-current routing amendment](docs/tasks/T102-route-binding-amendment.md).
+  Immediately before each distinct direct notification, use ordinary unarchived
+  `list_threads` only, filter to `kind=chatgpt` and `projectId` equal to
+  `g-p-6a9985b51f44819186f65b74fe8af5da`, then send to the unique eligible
+  thread with maximum `updatedAt`. Fail closed on missing/malformed metadata,
+  zero eligible threads, a tied maximum, or send failure. For routing, do not
+  call `list_archived_threads` or `read_thread`, search titles/content/assertions,
+  use route generations, or retain a persistent/cached endpoint binding. Send
+  only to the selected exact thread id. A send failure has no fallback route;
+  if retrying, perform one fresh metadata selection and reuse the same durable
+  notification id. Chat remains notification-only; use bounded active-turn PR
+  polling and resume only with durable completion evidence. Manual recovery
+  remains required when routing or completion is ambiguous; do not claim
+  restart-safe recovery.
 - One task uses one fresh branch and one pull request based on latest `main`.
 - A ready-for-review pull request must satisfy the task's published
   deliverables, required artifacts, verification, and acceptance criteria.

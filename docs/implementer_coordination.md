@@ -215,16 +215,20 @@ copyable templates and exact mechanics in the normative T102 protocol package:
 [`T102 Phase-B contract`](tasks/T102-agent-planner-notification-protocol.md)
 and its same-ID
 [`resume-identity amendment`](tasks/T102-resume-operation-identity-amendment.md)
-and [`active-set route-binding amendment`](tasks/T102-route-binding-amendment.md).
-The route amendment is authoritative over conflicting primary-contract route
-discovery/cache clauses: do not inspect archived/history conversations; filter
-the ordinary unarchived thread list to ChatGPT in the advertised STS project
-and `updatedAt` at or after generation activation before bounded recent reads;
-require exactly one exact assistant-authored assertion/hash match. Zero,
-multiple, or read-ambiguous candidates fail closed without widening. The
-Phase-A-proven endpoint may be validated directly. Once bound, validate the PR,
-advertisement, and current list, then read only the bound thread for each send;
-invalid routing requires explicit fresh-generation/recovery.
+and [`metadata-current routing amendment`](tasks/T102-route-binding-amendment.md).
+The routing amendment supersedes the primary contract's assertion/generation/
+binding-based route-selection and route-related canary prose; non-routing T102
+semantics remain unchanged. Immediately before each distinct direct
+notification, use ordinary unarchived `list_threads` only, filter to
+`kind=chatgpt` and `projectId` equal to the exact STS project
+`g-p-6a9985b51f44819186f65b74fe8af5da`, then select the unique eligible thread
+with maximum `updatedAt`. Missing/malformed metadata, zero eligible threads,
+tied maximum, or send failure are fail-closed cases. Do not call
+`list_archived_threads` or `read_thread` for routing, search title/content/
+assertions, use generations, or retain a cached/persistent binding. Send only
+to the selected exact thread id. A send failure has no fallback route; if
+retrying, perform one fresh metadata selection and reuse the same durable
+notification id. Re-resolve again before every later distinct send.
 Do this only after
 independent Implementer-result verification and classification; do not notify
 Planner merely because an Implementer finished or a routine check failed.

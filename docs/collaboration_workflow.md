@@ -64,22 +64,22 @@ regime, promotion criteria, or successor science.
 For the capability-grounded Planner routing protocol, the
 [`T102 Phase-B contract`](tasks/T102-agent-planner-notification-protocol.md)
 and its same-ID [`resume-identity amendment`](tasks/T102-resume-operation-identity-amendment.md)
-and [`active-set route-binding amendment`](tasks/T102-route-binding-amendment.md)
-are the normative mechanics package. The route-binding amendment supersedes
-the primary contract's conflicting candidate-resolution and cached-route
-clauses; the other T102 Phase-B semantics remain unchanged. For a new route
-generation, use only the ordinary unarchived `list_threads` surface. Before
-any `read_thread`, filter to ChatGPT records in the advertised STS project
-whose `updatedAt` is at or after generation activation; then make only bounded
-recent reads and require the exact current assistant-authored canonical
-assertion/hash. Do not enumerate archived or historical conversations. Exactly
-one match is required; zero, multiple, or decision-preventing read failures
-fail closed without widening the candidate set. The Phase-A-proven endpoint
-may be validated directly for the existing Planner. After binding, each send
-rechecks the PR/active advertisement and ordinary current list, then reads only
-the bound thread. A changed or invalid route fails closed and requires explicit
-fresh-generation/recovery. This section establishes the repository-wide
-authority and role boundaries without duplicating the remaining T102 mechanics.
+and [`metadata-current routing amendment`](tasks/T102-route-binding-amendment.md)
+are the normative mechanics package. The routing amendment supersedes the
+primary contract's assertion/generation/binding-based route-selection and
+route-related canary prose; all non-routing T102 semantics remain unchanged.
+Immediately before every distinct direct notification, use only ordinary
+unarchived `list_threads`, filter to `kind=chatgpt` and `projectId` equal to the
+exact STS project `g-p-6a9985b51f44819186f65b74fe8af5da`, and select the unique
+eligible thread with maximum `updatedAt`. Missing or malformed metadata, no
+eligible threads, a tied maximum, and send failure fail closed without
+widening the search. Do not call `list_archived_threads` or `read_thread` for
+routing, search title or content, use assertions/generations, or retain a route
+binding. Resolve again before each later distinct send and send only to the
+selected exact thread id. A send failure has no fallback route; if retrying,
+perform one fresh metadata selection and reuse the same durable notification id.
+This section establishes the repository-wide authority and role boundaries
+without duplicating the remaining T102 mechanics.
 
 Use this protocol only after the Maintainer has verified the Implementer result
 and classified the next action as Planner-owned. Routine Implementer completion,
@@ -92,11 +92,11 @@ authorize landing. Planner decisions and their exact-head/request correlation
 must be durable on the PR before Maintainer action.
 
 After delivery, the Maintainer remains in the same active turn and uses a
-task-specific bounded sleep/poll loop to reread PR head, route generation, and
-comments. There is no repository-wide polling interval or wait-budget default.
-A stale exact-head request stops for re-review; a superseding route invalidates
-the cached conversation and requires route resolution again. Do not turn an
-ordinary Planner wait into a detached-job heartbeat.
+task-specific bounded sleep/poll loop to reread PR head and comments. There is
+no repository-wide polling interval or wait-budget default. A stale exact-head
+request stops for re-review. Each distinct later notification independently
+resolves the current thread from list metadata; do not retain a route binding.
+Do not turn an ordinary Planner wait into a detached-job heartbeat.
 
 Automatic follow-up is allowed only when the action has a stable operation
 identity and completion is idempotent or durably observable before retry. Check
