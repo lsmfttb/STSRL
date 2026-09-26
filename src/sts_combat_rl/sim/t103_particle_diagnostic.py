@@ -25,8 +25,8 @@ from sts_combat_rl.sim.public_run_context import (
     read_native_public_projection,
 )
 from sts_combat_rl.sim.t101_particle_convergence import (
-    T101_SEED_ALGORITHM,
     T101_SEARCH_SIMULATIONS,
+    T101_SEED_ALGORITHM,
     derive_t101_sampler_seed,
     validate_t101_bridge_report,
 )
@@ -241,20 +241,22 @@ def _bridge_observations(
         if isinstance(root, Mapping):
             search_reached = True
             root_rows = particle.get("root_rows")
-            if isinstance(root_rows, list):
-                for row in root_rows:
-                    if not isinstance(row, Mapping):
-                        root_values_valid = False
-                        continue
-                    visits = row.get("visits")
-                    if (
-                        not isinstance(visits, int)
-                        or isinstance(visits, bool)
-                        or visits < 0
-                        or not _is_finite_number(row.get("evaluation_sum"))
-                        or not _is_finite_number(row.get("mean_value"))
-                    ):
-                        root_values_valid = False
+            if not isinstance(root_rows, list) or not root_rows:
+                root_values_valid = False
+                continue
+            for row in root_rows:
+                if not isinstance(row, Mapping):
+                    root_values_valid = False
+                    continue
+                visits = row.get("visits")
+                if (
+                    not isinstance(visits, int)
+                    or isinstance(visits, bool)
+                    or visits < 0
+                    or not _is_finite_number(row.get("evaluation_sum"))
+                    or not _is_finite_number(row.get("mean_value"))
+                ):
+                    root_values_valid = False
 
     if mapping_failed:
         observations["occurrence_mapping_reached"] = True
@@ -325,9 +327,11 @@ def _candidate_base(
         "public_projection_parity_status": "not_reached",
         "ordered_legal_action_parity_status": "not_reached",
         "bridge_invocation_status": "not_reached",
-        "occurrence_mapping_status": "not_reached",
-        "search_execution_status": "not_reached",
-        "valid_finite_root_report_status": "not_reached",
+        # An opaque bridge failure does not establish which native stages ran.
+        # Use not_reached only after direct evidence of an earlier short circuit.
+        "occurrence_mapping_status": "unknown",
+        "search_execution_status": "unknown",
+        "valid_finite_root_report_status": "unknown",
         "diagnostic_class": "OPAQUE_BRIDGE_FAILURE",
         "subreason_code": "observable_boundary_not_localized",
         "exception_type": None,
@@ -522,9 +526,9 @@ class T103NativeRecordRunner:
             ):
                 evidence["bridge_precondition_or_sampler_failed"] = True
             row["bridge_invocation_status"] = "returned_report"
-            if report_evidence.get("public_projection_parity") is False:
+            if evidence.get("public_projection_parity") is False:
                 row["public_projection_parity_status"] = "failed"
-            elif row["public_projection_parity_status"] == "not_reached":
+            elif evidence.get("public_projection_parity") is True:
                 row["public_projection_parity_status"] = "matched"
             if report_evidence.get("ordered_legal_action_parity") is False:
                 row["ordered_legal_action_parity_status"] = "failed"
@@ -534,9 +538,7 @@ class T103NativeRecordRunner:
             if report_evidence.get("mapping_ambiguous") is True:
                 row["occurrence_mapping_status"] = "ambiguous"
             elif report_evidence.get("mapping_complete") is False:
-                row["occurrence_mapping_status"] = (
-                    "incomplete"
-                )
+                row["occurrence_mapping_status"] = "incomplete"
             elif report_evidence.get("mapping_complete") is True:
                 row["occurrence_mapping_status"] = "complete"
             elif report_evidence.get("mapping_ambiguous") is True:
@@ -546,37 +548,48 @@ class T103NativeRecordRunner:
                 row["search_execution_status"] = "reached"
             elif row["occurrence_mapping_status"] in {"incomplete", "ambiguous"}:
                 row["search_execution_status"] = "not_reached"
+            if report_evidence.get("required_root_values_valid") is False:
+                row["valid_finite_root_report_status"] = "failed"
 
             try:
                 validated = validate_t101_bridge_report(raw_report, particle_count=2)
             except Exception as validation_exc:
                 exc = validation_exc
-                if report_evidence.get("search_execution_reached") is True:
-                    row["valid_finite_root_report_status"] = "failed"
                 raise _T103ObservedBoundary(
                     "frozen bridge validation failed"
                 ) from validation_exc
             if not isinstance(validated, Mapping):
                 evidence["observation_failed"] = True
                 raise _T103ObservedBoundary("validated bridge report is malformed")
-            row["valid_finite_root_report_status"] = "reached"
+            if evidence.get("required_root_values_valid") is not False:
+                row["valid_finite_root_report_status"] = "reached"
             row["search_execution_status"] = "reached"
-            row["occurrence_mapping_status"] = "complete"
-            evidence.update(
-                {
-                    "mapping_complete": True,
-                    "mapping_ambiguous": False,
-                    "search_execution_reached": True,
-                    "required_root_values_valid": True,
-                    "complete_admission": True,
-                }
-            )
+            evidence["search_execution_reached"] = True
+            if (
+                evidence.get("mapping_complete") is not False
+                and evidence.get("mapping_ambiguous") is not True
+            ):
+                row["occurrence_mapping_status"] = "complete"
+                evidence["mapping_complete"] = True
+                evidence["mapping_ambiguous"] = False
+            if evidence.get("required_root_values_valid") is not False:
+                evidence["required_root_values_valid"] = True
+            if (
+                evidence.get("public_projection_parity") is not False
+                and evidence.get("ordered_legal_action_parity") is not False
+                and evidence.get("bridge_precondition_or_sampler_failed") is not True
+                and evidence.get("mapping_complete") is True
+                and evidence.get("mapping_ambiguous") is False
+                and evidence.get("required_root_values_valid") is True
+            ):
+                evidence["complete_admission"] = True
         except _T103ObservedBoundary as observed:
             if exc is None and observed.__cause__ is not None:
                 exc = observed.__cause__
             elif exc is None and evidence.get("restore_binding_failed") is None:
                 exc = observed
-        except Exception as boundary_exc:
+        # Native adapter exceptions vary by runtime; retain their exact type.
+        except Exception as boundary_exc:  # noqa: BLE001
             exc = boundary_exc
             if row["bridge_invocation_status"] == "invoked":
                 evidence["bridge_failure_unlocalized"] = True
@@ -602,45 +615,17 @@ class T103NativeRecordRunner:
             )
         if exc is not None:
             row.update(exception_signature(exc))
-        if diagnostic_class == "RESTORE_OR_SOURCE_BINDING_FAILURE":
-            row.update(
-                {
-                    "restore_status": "failed",
-                    "public_projection_parity_status": "not_reached",
-                    "ordered_legal_action_parity_status": "not_reached",
-                    "bridge_invocation_status": "not_reached",
-                    "occurrence_mapping_status": "not_reached",
-                    "search_execution_status": "not_reached",
-                    "valid_finite_root_report_status": "not_reached",
-                }
-            )
-        elif diagnostic_class == "PUBLIC_PROJECTION_PARITY_FAILURE":
-            row.update(
-                {
-                    "ordered_legal_action_parity_status": "not_reached",
-                    "bridge_invocation_status": "not_reached",
-                    "occurrence_mapping_status": "not_reached",
-                    "search_execution_status": "not_reached",
-                    "valid_finite_root_report_status": "not_reached",
-                }
-            )
-        elif diagnostic_class == "ORDERED_LEGAL_ACTION_PARITY_FAILURE":
-            row.update(
-                {
-                    "bridge_invocation_status": "not_reached",
-                    "occurrence_mapping_status": "not_reached",
-                    "search_execution_status": "not_reached",
-                    "valid_finite_root_report_status": "not_reached",
-                }
-            )
-        elif diagnostic_class == "BRIDGE_PRECONDITION_OR_SAMPLER_FAILURE":
-            row.update(
-                {
-                    "occurrence_mapping_status": "not_reached",
-                    "search_execution_status": "not_reached",
-                    "valid_finite_root_report_status": "not_reached",
-                }
-            )
+        # Only mark downstream stages not_reached when the bridge was directly
+        # known not to have been invoked. A returned but malformed/opaque report
+        # leaves those native stages unknown unless it proves positive reach.
+        if row["bridge_invocation_status"] in {"not_reached", "failed_precondition"}:
+            for field in (
+                "occurrence_mapping_status",
+                "search_execution_status",
+                "valid_finite_root_report_status",
+            ):
+                if row[field] == "unknown":
+                    row[field] = "not_reached"
         if diagnostic_class in T103_MAPPING_CLASSES:
             row["occurrence_mapping_status"] = {
                 "ROOT_OCCURRENCE_MAPPING_INCOMPLETE": "incomplete",
@@ -649,7 +634,10 @@ class T103NativeRecordRunner:
                     "incomplete_or_ambiguous"
                 ),
             }[diagnostic_class]
-            row["search_execution_status"] = "not_reached"
+            if row["search_execution_status"] != "reached":
+                row["search_execution_status"] = "not_reached"
+            if row["valid_finite_root_report_status"] == "unknown":
+                row["valid_finite_root_report_status"] = "not_reached"
         return row
 
 
@@ -707,6 +695,30 @@ def aggregate_t103_diagnostics(
         if admitted
         else "SUPPORT_DOMAIN_FAILURE_TAXONOMY_ESTABLISHED"
     )
+    newly_admitted = [row for row in rows if row.get("admitted") is True]
+    retained_execution_identity = t101_input_bindings.get(
+        "retained_t101_execution_identity"
+    )
+    if admitted and (
+        not isinstance(native_identity, Mapping)
+        or not {"repository", "ref", "commit"}.issubset(native_identity)
+        or not isinstance(retained_execution_identity, Mapping)
+        or not {
+            "implementation_head",
+            "native_identity",
+            "readiness_authorization_sha256",
+            "input_admission_artifact_sha256",
+            "cohort_admission_artifact_sha256",
+        }.issubset(retained_execution_identity)
+        or any(
+            not isinstance(row.get("source_ordinal"), int)
+            or not isinstance(row.get("selection_digest"), str)
+            for row in newly_admitted
+        )
+    ):
+        raise T103DiagnosticError(
+            "baseline mismatch lacks exact candidate or execution identities"
+        )
     include_distribution = admitted == 0
     class_counts = Counter(str(row["diagnostic_class"]) for row in rows)
     by_stratum: dict[str, object] = {}
@@ -777,8 +789,7 @@ def aggregate_t103_diagnostics(
                 "occurrence_mapping_related": _fraction(mapping_count, expected_total),
                 "search_execution_reached": _fraction(
                     sum(
-                        row.get("search_execution_status") == "reached"
-                        for row in rows
+                        row.get("search_execution_status") == "reached" for row in rows
                     ),
                     expected_total,
                 ),
@@ -802,6 +813,25 @@ def aggregate_t103_diagnostics(
             "t101_admitted_candidates": 0,
             "t103_admitted_candidates": admitted,
             "reproduced": admitted == 0,
+            **(
+                {
+                    "newly_admitted_candidates": [
+                        {
+                            "selection_identity": row["selection_identity"],
+                            "stratum": row["stratum"],
+                            "source_ordinal": row["source_ordinal"],
+                            "selection_digest": row["selection_digest"],
+                        }
+                        for row in newly_admitted
+                    ],
+                    "current_native_identity": dict(native_identity),
+                    "retained_t101_execution_identity": dict(
+                        retained_execution_identity
+                    ),
+                }
+                if admitted
+                else {}
+            ),
         },
         "nonclaims": [
             "no hidden root cause beyond retained direct observations",
@@ -953,9 +983,7 @@ def replay_t103_candidates(
 
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         return [
-            row
-            for shard_rows in executor.map(run_shard, shards)
-            for row in shard_rows
+            row for shard_rows in executor.map(run_shard, shards) for row in shard_rows
         ]
 
 

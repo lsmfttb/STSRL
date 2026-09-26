@@ -11,6 +11,7 @@ import sts_combat_rl.sim.t101_particle_convergence as t101
 import sts_combat_rl.sim.t103_particle_diagnostic as t103
 from sts_combat_rl.sim.t103_particle_diagnostic import (
     T103_CLASSES,
+    T103DiagnosticError,
     T103NativeRecordRunner,
     aggregate_t103_diagnostics,
     classify_t103_observation,
@@ -179,14 +180,16 @@ def test_diagnostic_invokes_frozen_success_call_once_and_does_not_retain_report(
     monkeypatch.setattr(
         t101,
         "validate_t101_bridge_report",
-        lambda report, *, particle_count: validator_inputs.append(report)
-        or {**report, "accepted": True},
+        lambda report, *, particle_count: (
+            validator_inputs.append(report) or {**report, "accepted": True}
+        ),
     )
     monkeypatch.setattr(
         t103,
         "validate_t101_bridge_report",
-        lambda report, *, particle_count: validator_inputs.append(report)
-        or {**report, "accepted": True},
+        lambda report, *, particle_count: (
+            validator_inputs.append(report) or {**report, "accepted": True}
+        ),
     )
     adapter = runner._adapter_factory()
     baseline = t101.call_t101_bridge(
@@ -246,7 +249,179 @@ def test_untyped_native_exception_stays_opaque_without_retry(monkeypatch) -> Non
     assert row["exception_type"] == "RuntimeError"
     assert len(row["exception_signature"]) == 64
     assert row["bridge_invocation_status"] == "failed"
+    assert row["occurrence_mapping_status"] == "unknown"
+    assert row["search_execution_status"] == "unknown"
+    assert row["valid_finite_root_report_status"] == "unknown"
     assert len(calls) == 2
+
+
+def test_anchor_projection_mismatch_updates_candidate_status(monkeypatch) -> None:
+    identity, report, _calls, runner = _runner(monkeypatch, lambda value: value)
+    report["anchor_public_information_projection"] = {"anchor": "accepted"}
+    monkeypatch.setattr(
+        t103,
+        "read_native_public_projection",
+        lambda *_args: SimpleNamespace(canonical_payload='{"anchor":"current"}'),
+    )
+    monkeypatch.setattr(
+        t103,
+        "validate_t101_bridge_report",
+        lambda value, *, particle_count: {**value, "accepted": True},
+    )
+
+    row = runner.diagnose(
+        {"selection_identity": identity, "cohort": "A"},
+        source_ordinal=0,
+        selection_digest=hashlib.sha256(identity.encode()).hexdigest(),
+    )
+
+    assert row["diagnostic_class"] == "PUBLIC_PROJECTION_PARITY_FAILURE"
+    assert row["public_projection_parity_status"] == "failed"
+    assert row["bridge_invocation_status"] == "returned_report"
+
+
+@pytest.mark.parametrize(
+    "root_rows_state",
+    [
+        "missing",
+        "non_list",
+        "empty",
+        "malformed",
+        "missing_required_value",
+        "nonfinite",
+    ],
+)
+def test_search_without_valid_required_root_rows_is_nonfinite_class(
+    root_rows_state, monkeypatch
+) -> None:
+    particle = {
+        "root_action_mapping_complete": True,
+        "root_action_mapping_ambiguous": False,
+        "root_evaluation": {},
+    }
+    if root_rows_state == "non_list":
+        particle["root_rows"] = {"row": "not a list"}
+    elif root_rows_state == "empty":
+        particle["root_rows"] = []
+    elif root_rows_state == "malformed":
+        particle["root_rows"] = ["not a row"]
+    elif root_rows_state == "missing_required_value":
+        particle["root_rows"] = [{"visits": 1, "mean_value": 1.0}]
+    elif root_rows_state == "nonfinite":
+        particle["root_rows"] = [
+            {"visits": 1, "evaluation_sum": float("nan"), "mean_value": 1.0}
+        ]
+    report = {"particles": [particle]}
+
+    evidence, _config = t103._bridge_observations(report)
+    assert evidence["search_execution_reached"] is True
+    assert evidence["required_root_values_valid"] is False
+    assert classify_t103_observation(evidence)[0] == (
+        "NONFINITE_OR_INVALID_REQUIRED_ROOT_VALUES"
+    )
+
+    identity, raw_report, _calls, runner = _runner(monkeypatch, lambda value: value)
+    raw_report["particles"] = [particle]
+    monkeypatch.setattr(
+        t103,
+        "validate_t101_bridge_report",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("required root rows are invalid")
+        ),
+    )
+    row = runner.diagnose(
+        {"selection_identity": identity, "cohort": "A"},
+        source_ordinal=0,
+        selection_digest=hashlib.sha256(identity.encode()).hexdigest(),
+    )
+    assert row["diagnostic_class"] == "NONFINITE_OR_INVALID_REQUIRED_ROOT_VALUES"
+    assert row["valid_finite_root_report_status"] == "failed"
+
+
+def test_invalid_root_validator_unrelated_to_required_values_stays_opaque(
+    monkeypatch,
+) -> None:
+    identity, report, _calls, runner = _runner(monkeypatch, lambda value: value)
+    report["particles"] = [
+        {
+            "root_action_mapping_complete": True,
+            "root_action_mapping_ambiguous": False,
+            "root_evaluation": {},
+            "root_rows": [{"visits": 1, "evaluation_sum": 1.0, "mean_value": 1.0}],
+        }
+    ]
+
+    def invalid_for_another_reason(*_args, **_kwargs):
+        raise ValueError("unrelated frozen report validation failure")
+
+    monkeypatch.setattr(t103, "validate_t101_bridge_report", invalid_for_another_reason)
+    row = runner.diagnose(
+        {"selection_identity": identity, "cohort": "A"},
+        source_ordinal=0,
+        selection_digest=hashlib.sha256(identity.encode()).hexdigest(),
+    )
+
+    assert row["diagnostic_class"] == "OPAQUE_BRIDGE_FAILURE"
+    assert row["search_execution_status"] == "reached"
+    assert row["occurrence_mapping_status"] == "complete"
+    assert row["valid_finite_root_report_status"] == "unknown"
+
+
+def test_precondition_mismatch_preserves_directly_reached_report_stages(
+    monkeypatch,
+) -> None:
+    identity, report, _calls, runner = _runner(monkeypatch, lambda value: value)
+    report["search_simulations"] = 399
+    report["particles"] = [
+        {
+            "root_action_mapping_complete": True,
+            "root_action_mapping_ambiguous": False,
+            "root_evaluation": {},
+            "root_rows": [{"visits": 1, "evaluation_sum": 1.0, "mean_value": 1.0}],
+        }
+    ]
+    monkeypatch.setattr(
+        t103,
+        "validate_t101_bridge_report",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("frozen config validation failed")
+        ),
+    )
+
+    row = runner.diagnose(
+        {"selection_identity": identity, "cohort": "A"},
+        source_ordinal=0,
+        selection_digest=hashlib.sha256(identity.encode()).hexdigest(),
+    )
+
+    assert row["diagnostic_class"] == "BRIDGE_PRECONDITION_OR_SAMPLER_FAILURE"
+    assert row["occurrence_mapping_status"] == "complete"
+    assert row["search_execution_status"] == "reached"
+    assert row["valid_finite_root_report_status"] == "unknown"
+
+
+def test_malformed_opaque_bridge_report_keeps_unobserved_stages_unknown(
+    monkeypatch,
+) -> None:
+    identity, _report, _calls, runner = _runner(monkeypatch, lambda _value: None)
+    monkeypatch.setattr(
+        t103,
+        "validate_t101_bridge_report",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("malformed bridge report")
+        ),
+    )
+    row = runner.diagnose(
+        {"selection_identity": identity, "cohort": "A"},
+        source_ordinal=0,
+        selection_digest=hashlib.sha256(identity.encode()).hexdigest(),
+    )
+
+    assert row["diagnostic_class"] == "OPAQUE_BRIDGE_FAILURE"
+    assert row["bridge_invocation_status"] == "returned_report"
+    assert row["occurrence_mapping_status"] == "unknown"
+    assert row["search_execution_status"] == "unknown"
+    assert row["valid_finite_root_report_status"] == "unknown"
 
 
 def test_bridge_report_flags_localize_only_structured_failures() -> None:
@@ -294,6 +469,10 @@ def _aggregate_rows(admitted_at: int | None = None):
             {
                 "selection_identity": f"selection-{ordinal}",
                 "stratum": stratum,
+                "source_ordinal": ordinal,
+                "selection_digest": hashlib.sha256(
+                    f"selection-{ordinal}".encode()
+                ).hexdigest(),
                 "diagnostic_class": diagnostic_class,
                 "subreason_code": "fixture_reason",
                 "search_execution_status": (
@@ -333,11 +512,53 @@ def test_aggregate_counts_and_baseline_gate() -> None:
     changed = aggregate_t103_diagnostics(
         _aggregate_rows(admitted_at=0),
         source_counts={"A": 93, "B": 192, "C": 128},
-        t101_input_bindings={"input_sha256": "a" * 64},
-        native_identity={"commit": "b" * 40},
+        t101_input_bindings={
+            "input_sha256": "a" * 64,
+            "retained_t101_execution_identity": {
+                "implementation_head": "d" * 40,
+                "native_identity": {
+                    "repository": "fixture/native",
+                    "ref": "fixture/ref",
+                    "commit": "f" * 40,
+                },
+                "readiness_authorization_sha256": "e" * 64,
+                "input_admission_artifact_sha256": "1" * 64,
+                "cohort_admission_artifact_sha256": "2" * 64,
+            },
+        },
+        native_identity={
+            "repository": "fixture/native",
+            "ref": "fixture/ref",
+            "commit": "b" * 40,
+        },
     )
     assert changed["terminal_classification"] == "T101_SUPPORT_RESULT_NOT_REPRODUCED"
     assert changed["diagnostic_distribution"] is None
+    baseline = changed["baseline_reproduction"]
+    assert baseline["newly_admitted_candidates"] == [
+        {
+            "selection_identity": "selection-0",
+            "stratum": "A",
+            "source_ordinal": 0,
+            "selection_digest": hashlib.sha256(b"selection-0").hexdigest(),
+        }
+    ]
+    assert baseline["current_native_identity"] == {
+        "repository": "fixture/native",
+        "ref": "fixture/ref",
+        "commit": "b" * 40,
+    }
+    assert baseline["retained_t101_execution_identity"] == {
+        "implementation_head": "d" * 40,
+        "native_identity": {
+            "repository": "fixture/native",
+            "ref": "fixture/ref",
+            "commit": "f" * 40,
+        },
+        "readiness_authorization_sha256": "e" * 64,
+        "input_admission_artifact_sha256": "1" * 64,
+        "cohort_admission_artifact_sha256": "2" * 64,
+    }
 
 
 def test_replay_preserves_attempt_order_and_balanced_worker_ranges() -> None:

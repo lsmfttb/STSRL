@@ -264,6 +264,9 @@ def _load_t101_terminal_inputs(
         "t101_cohort_admission": cohort_ref,
         "t101_final_report": final_ref,
         "t101_cost_report": cost_ref,
+        # Preserve the historical producer's exact execution identity separately
+        # from the current-native identity used by T103.
+        "retained_t101_execution_identity": dict(provenance),
         "accepted_t101_source_artifacts": _t101_input_artifact_bindings(
             input_admission
         ),
@@ -487,9 +490,7 @@ def run_t103_diagnostics_from_paths(
         "worker_reduction_reason": lower_worker_reason,
         "shard_count": effective_workers,
         "sharding_policy": "contiguous_t101_order_balanced_ranges_v1",
-        "record_shard_ranges": t103_record_shard_ranges(
-            len(rows), effective_workers
-        ),
+        "record_shard_ranges": t103_record_shard_ranges(len(rows), effective_workers),
         "source_pool_loading": "one_process_shared_canonical_maps",
         "candidate_calls": len(rows),
     }
