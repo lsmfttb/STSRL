@@ -113,8 +113,18 @@ def _t101_input_artifact_bindings(
     for role, eligibility in artifacts.items():
         if not isinstance(role, str) or not isinstance(eligibility, Mapping):
             raise T103PathError("T101 input artifact binding is malformed")
-        artifact = eligibility.get("artifact")
-        integrity = eligibility.get("integrity")
+        qualification = eligibility.get("artifact")
+        requirements = eligibility.get("requirements")
+        if (
+            eligibility.get("schema_version") != "artifact-eligibility-v1"
+            or eligibility.get("eligible") is not True
+            or not isinstance(qualification, Mapping)
+            or qualification.get("schema_version") != "artifact-eligibility-v1"
+            or not isinstance(requirements, Mapping)
+        ):
+            raise T103PathError(f"T101 input artifact binding {role} is incomplete")
+        artifact = qualification.get("artifact")
+        integrity = qualification.get("integrity")
         if not isinstance(artifact, Mapping) or not isinstance(integrity, Mapping):
             raise T103PathError(f"T101 input artifact binding {role} is incomplete")
         path = artifact.get("path")
@@ -126,11 +136,17 @@ def _t101_input_artifact_bindings(
             or not path
             or not isinstance(schema, str)
             or not schema
+            or artifact.get("id") != role
+            or artifact.get("kind") != schema
             or isinstance(size, bool)
             or not isinstance(size, int)
             or size < 0
             or not isinstance(sha, str)
             or len(sha) != 64
+            or any(char not in "0123456789abcdef" for char in sha)
+            or requirements.get("artifact_id") != role
+            or requirements.get("artifact_kind") != schema
+            or requirements.get("sha256") != sha
         ):
             raise T103PathError(f"T101 input artifact binding {role} is malformed")
         result[role] = {

@@ -7,8 +7,16 @@ from types import SimpleNamespace
 
 import pytest
 
+import sts_combat_rl.commands.t103_particle_diagnostic as t103_command
 import sts_combat_rl.sim.t101_particle_convergence as t101
 import sts_combat_rl.sim.t103_particle_diagnostic as t103
+from sts_combat_rl.artifact_eligibility import (
+    ArtifactQualification,
+    EligibilityRequirements,
+    Fact,
+    Predicate,
+    evaluate_eligibility,
+)
 from sts_combat_rl.sim.t103_particle_diagnostic import (
     T103_CLASSES,
     T103DiagnosticError,
@@ -19,6 +27,56 @@ from sts_combat_rl.sim.t103_particle_diagnostic import (
     t103_record_shard_ranges,
     write_t103_retained_artifacts,
 )
+
+
+def test_t101_input_artifact_binding_reads_nested_eligibility_identity() -> None:
+    role = "native_source_manifest"
+    schema = "sts-lightspeed-source-manifest-v1"
+    digest = "a" * 64
+    path = "D:/retained/t101/sts_lightspeed_source_manifest.json"
+    eligibility = evaluate_eligibility(
+        ArtifactQualification(
+            artifact={
+                "id": role,
+                "kind": schema,
+                "path": path,
+                "schema_id": schema,
+                "size_bytes": 731,
+            },
+            integrity={"sha256": digest},
+            facts={
+                "record_count": Fact(1),
+                "source.coverage": Fact("fixture-coverage"),
+                "override_kind": Fact("none"),
+            },
+        ),
+        EligibilityRequirements(
+            reuse_mode="scientific_quality_claim",
+            claim_boundary="bounded particle-proxy stability and cost under frozen T101 semantics",
+            predicates=(
+                Predicate("record_count", "equals", 1),
+                Predicate("source.coverage", "equals", "fixture-coverage"),
+            ),
+            artifact_id=role,
+            artifact_kind=schema,
+            sha256=digest,
+        ),
+    )
+
+    assert eligibility["eligible"] is True
+    nested = eligibility["artifact"]
+    assert nested["artifact"]["path"] == path
+    assert nested["integrity"]["sha256"] == digest
+    assert t103_command._t101_input_artifact_bindings(
+        {"artifacts": {role: eligibility}}
+    ) == {
+        role: {
+            "path": path,
+            "schema_id": schema,
+            "sha256": digest,
+            "size_bytes": 731,
+        }
+    }
 
 
 @pytest.mark.parametrize(
