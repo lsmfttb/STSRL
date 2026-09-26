@@ -44,6 +44,14 @@ _T101_ROLE_SCHEMAS = {
     "cost_report": "t101-cost-report-v1",
     "final_report": "t101-final-report-v1",
 }
+_T103_NATIVE_WORKER_LIMIT = 1
+_T103_SINGLE_WORKER_REASON = (
+    "The pinned sample_hidden_future_particles_search pybind binding does not "
+    "release the GIL, so Python threads serialize native calls. Process workers "
+    "would require safely sharing or duplicating the approximately 7.5 GB "
+    "canonical source pool, and no bounded shared-memory process path is "
+    "established; use one effective worker."
+)
 
 
 def _sha256_file(path: Path) -> str:
@@ -156,6 +164,56 @@ def _t101_input_artifact_bindings(
             "size_bytes": size,
         }
     return result
+
+
+def _t103_worker_plan(
+    *,
+    host_workers: int,
+    requested_workers: int | None,
+    requested_reduction_reason: str | None,
+) -> tuple[int, int, str | None]:
+    """Resolve truthful T103 concurrency for the current pinned native binding."""
+
+    if (
+        isinstance(host_workers, bool)
+        or not isinstance(host_workers, int)
+        or host_workers < 1
+    ):
+        raise T103PathError("T103 host worker target must be a positive integer")
+    target_workers = min(host_workers, sum(T101_SOURCE_COUNTS.values()))
+    if requested_workers is None:
+        effective_workers = min(target_workers, _T103_NATIVE_WORKER_LIMIT)
+    elif (
+        isinstance(requested_workers, bool)
+        or not isinstance(requested_workers, int)
+        or not 1 <= requested_workers <= target_workers
+    ):
+        raise T103PathError("T103 worker count must be between one and the host target")
+    elif requested_workers > _T103_NATIVE_WORKER_LIMIT:
+        raise T103PathError(
+            "the pinned native bridge holds the GIL; only one effective worker "
+            "is supported until parallel native execution is established"
+        )
+    else:
+        effective_workers = requested_workers
+
+    if effective_workers == target_workers:
+        if requested_reduction_reason is not None:
+            raise T103PathError(
+                "lower-worker reason is only valid below the host target"
+            )
+        return target_workers, effective_workers, None
+
+    reason = _T103_SINGLE_WORKER_REASON
+    if requested_reduction_reason is not None:
+        if (
+            not isinstance(requested_reduction_reason, str)
+            or not requested_reduction_reason.strip()
+        ):
+            raise T103PathError("a requested lower-worker reason must be non-empty")
+        if requested_reduction_reason.strip() != reason:
+            reason = f"{reason} Additional operator constraint: {requested_reduction_reason.strip()}"
+    return target_workers, effective_workers, reason
 
 
 def _load_t101_terminal_inputs(
@@ -317,29 +375,16 @@ def _current_native_identity(
         raise T103PathError(
             "current native manifest lacks accepted T098/T099 capabilities"
         )
-    artifacts = input_admission.get("artifacts")
-    manifest_qualification = (
-        artifacts.get("native_source_manifest")
-        if isinstance(artifacts, Mapping)
-        else None
+    manifest_binding = _t101_input_artifact_bindings(input_admission).get(
+        "native_source_manifest"
     )
-    artifact = (
-        manifest_qualification.get("artifact")
-        if isinstance(manifest_qualification, Mapping)
-        else None
-    )
-    integrity = (
-        manifest_qualification.get("integrity")
-        if isinstance(manifest_qualification, Mapping)
-        else None
-    )
-    if not isinstance(artifact, Mapping) or not isinstance(integrity, Mapping):
+    if not isinstance(manifest_binding, Mapping):
         raise T103PathError("T101 input admission lacks its source-manifest binding")
     current_manifest_path = Path(manifest.path).resolve(strict=True)
     if (
-        integrity.get("sha256") != _sha256_file(current_manifest_path)
-        or artifact.get("size_bytes") != current_manifest_path.stat().st_size
-        or artifact.get("schema_id") != "sts-lightspeed-source-manifest-v1"
+        manifest_binding.get("sha256") != _sha256_file(current_manifest_path)
+        or manifest_binding.get("size_bytes") != current_manifest_path.stat().st_size
+        or manifest_binding.get("schema_id") != "sts-lightspeed-source-manifest-v1"
     ):
         raise T103PathError(
             "current native manifest differs from retained T101 input binding"
@@ -415,20 +460,11 @@ def run_t103_diagnostics_from_paths(
     ):
         raise T103PathError("T103 implementation head must be a full SHA-1")
     host_workers = max(1, os.cpu_count() or 1)
-    target_workers = min(host_workers, sum(T101_SOURCE_COUNTS.values()))
-    effective_workers = target_workers if worker_count is None else worker_count
-    if (
-        isinstance(effective_workers, bool)
-        or not isinstance(effective_workers, int)
-        or not 1 <= effective_workers <= target_workers
-    ):
-        raise T103PathError("T103 worker count must be between one and the host target")
-    if effective_workers < target_workers and not (
-        isinstance(lower_worker_reason, str) and lower_worker_reason.strip()
-    ):
-        raise T103PathError("a documented lower-worker reason is required")
-    if effective_workers == target_workers and lower_worker_reason is not None:
-        raise T103PathError("lower-worker reason is only valid below the host target")
+    target_workers, effective_workers, worker_reduction_reason = _t103_worker_plan(
+        host_workers=host_workers,
+        requested_workers=worker_count,
+        requested_reduction_reason=lower_worker_reason,
+    )
 
     start_load = time.perf_counter()
     _t101_manifest, input_admission, cohort, historical_bindings, accepted_native = (
@@ -503,7 +539,8 @@ def run_t103_diagnostics_from_paths(
         "replay_wall_clock_time_s": replay_wall,
         "worker_target": target_workers,
         "effective_worker_count": effective_workers,
-        "worker_reduction_reason": lower_worker_reason,
+        "native_bridge_gil_released": False,
+        "worker_reduction_reason": worker_reduction_reason,
         "shard_count": effective_workers,
         "sharding_policy": "contiguous_t101_order_balanced_ranges_v1",
         "record_shard_ranges": t103_record_shard_ranges(len(rows), effective_workers),
@@ -527,7 +564,8 @@ def run_t103_diagnostics_from_paths(
             "current_native_identity": current_native,
             "historical_t101_bindings": historical_bindings,
             "effective_worker_count": effective_workers,
-            "worker_reduction_reason": lower_worker_reason,
+            "native_bridge_gil_released": False,
+            "worker_reduction_reason": worker_reduction_reason,
         },
         regeneration_command=regeneration,
         retention_reason=retention_reason,

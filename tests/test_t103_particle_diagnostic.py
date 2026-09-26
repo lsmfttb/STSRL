@@ -29,39 +29,63 @@ from sts_combat_rl.sim.t103_particle_diagnostic import (
 )
 
 
-def test_t101_input_artifact_binding_reads_nested_eligibility_identity() -> None:
+def _native_manifest_eligibility(
+    path: str, digest: str, size: int
+) -> dict[str, object]:
     role = "native_source_manifest"
     schema = "sts-lightspeed-source-manifest-v1"
-    digest = "a" * 64
-    path = "D:/retained/t101/sts_lightspeed_source_manifest.json"
-    eligibility = evaluate_eligibility(
+    return evaluate_eligibility(
         ArtifactQualification(
             artifact={
                 "id": role,
                 "kind": schema,
                 "path": path,
                 "schema_id": schema,
-                "size_bytes": 731,
+                "size_bytes": size,
             },
             integrity={"sha256": digest},
             facts={
-                "record_count": Fact(1),
-                "source.coverage": Fact("fixture-coverage"),
+                "record_count": Fact(413),
+                "source.coverage": Fact("accepted_t087_t088_matched_population"),
+                "payload_complete": Fact(True),
+                "partial": Fact(False),
+                "debug_only": Fact(False),
+                "superseded_for_t101": Fact(False),
                 "override_kind": Fact("none"),
             },
         ),
         EligibilityRequirements(
             reuse_mode="scientific_quality_claim",
-            claim_boundary="bounded particle-proxy stability and cost under frozen T101 semantics",
+            claim_boundary=(
+                "bounded particle-proxy stability and cost under frozen T101 semantics"
+            ),
             predicates=(
-                Predicate("record_count", "equals", 1),
-                Predicate("source.coverage", "equals", "fixture-coverage"),
+                Predicate("record_count", "equals", 413),
+                Predicate(
+                    "source.coverage",
+                    "equals",
+                    "accepted_t087_t088_matched_population",
+                ),
+                Predicate("payload_complete", "equals", True),
+                Predicate("partial", "equals", False),
+                Predicate("debug_only", "equals", False),
+                Predicate("superseded_for_t101", "equals", False),
+                Predicate("override_kind", "equals", "none"),
             ),
             artifact_id=role,
             artifact_kind=schema,
             sha256=digest,
         ),
     )
+
+
+def test_t101_input_artifact_binding_reads_nested_eligibility_identity() -> None:
+    role = "native_source_manifest"
+    schema = "sts-lightspeed-source-manifest-v1"
+    digest = "a2b83373a0051a52a1e6092fe36fabab0e4478f98753c169580ae4b53c588205"
+    path = "/mnt/d/DeadlyCatCoding/STSRL-T101/docs/sts_lightspeed_source_manifest.json"
+    size = 16886
+    eligibility = _native_manifest_eligibility(path, digest, size)
 
     assert eligibility["eligible"] is True
     nested = eligibility["artifact"]
@@ -74,9 +98,72 @@ def test_t101_input_artifact_binding_reads_nested_eligibility_identity() -> None
             "path": path,
             "schema_id": schema,
             "sha256": digest,
-            "size_bytes": 731,
+            "size_bytes": size,
         }
     }
+
+
+def test_current_native_identity_reads_validated_nested_t101_manifest_binding(
+    tmp_path: Path, monkeypatch
+) -> None:
+    current_path = tmp_path / "sts_lightspeed_source_manifest.json"
+    payload = b'{"schema_id":"sts-lightspeed-source-manifest-v1"}\n'
+    current_path.write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    identity = {
+        "repository": "lsmfttb/sts_lightspeed",
+        "ref": "refs/heads/stsrl/main",
+        "commit": "97f59b620efe5ee1571f8da298c99d1e21c1149b",
+    }
+    manifest = SimpleNamespace(
+        integration=SimpleNamespace(
+            repository_url="https://github.com/lsmfttb/sts_lightspeed.git",
+            ref=identity["ref"],
+            commit=identity["commit"],
+        ),
+        capability_ids={
+            "native_t096_public_information_hidden_future_sampler",
+            "native_stsr006_particle_search_bridge",
+        },
+        path=str(current_path),
+    )
+    monkeypatch.setattr(
+        t103_command,
+        "load_lightspeed_source_manifest",
+        lambda: manifest,
+    )
+    eligibility = _native_manifest_eligibility(
+        "D:/retained/t101/sts_lightspeed_source_manifest.json",
+        digest,
+        len(payload),
+    )
+
+    assert (
+        t103_command._current_native_identity(
+            {"artifacts": {"native_source_manifest": eligibility}}
+        )
+        == identity
+    )
+
+
+def test_worker_plan_reports_gil_and_memory_limited_effective_concurrency() -> None:
+    target, effective, reason = t103_command._t103_worker_plan(
+        host_workers=16,
+        requested_workers=None,
+        requested_reduction_reason=None,
+    )
+
+    assert target == 16
+    assert effective == 1
+    assert reason is not None
+    assert "does not release the GIL" in reason
+    assert "approximately 7.5 GB" in reason
+    with pytest.raises(t103_command.T103PathError, match="only one effective worker"):
+        t103_command._t103_worker_plan(
+            host_workers=16,
+            requested_workers=16,
+            requested_reduction_reason=None,
+        )
 
 
 @pytest.mark.parametrize(
