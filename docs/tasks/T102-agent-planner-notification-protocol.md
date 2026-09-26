@@ -1,22 +1,30 @@
-# T102: Structured Agent-to-Planner Notification and Attribution Protocol
+# T102: Bidirectional Agent-Planner Review Rendezvous and Notification Protocol
 
 Artifact Eligibility Required: false
 
 ## Objective
 
-Establish a repository-wide protocol that allows authorized project Agents to
-proactively notify Planner when Planner action is required, without requiring
-the user to relay ordinary review requests and without allowing notification
-traffic to become a second authority channel or an unbounded Planner-context
-stream.
+Establish a repository-wide **bidirectional** review-rendezvous protocol that
+allows authorized project Agents to proactively notify the correct current
+Planner when Planner action is required **and allows Planner to wake/resume the
+originating Agent after the durable decision is recorded**, without requiring
+the user to relay either side of the exchange.
+
+The protocol must remove two distinct manual-relay points:
+
+1. requester -> Planner: "review/decide this exact durable request";
+2. Planner -> requester: "the durable Planner decision now exists; resume from
+   this exact decision".
+
+Neither direction may become a second authority channel or an unbounded
+conversation-context stream.
 
 T102 addresses a workflow problem, not a scientific one:
 
-> Agent -> Planner communication should be fast enough to remove routine human
-> relay, while remaining attributable, idempotent under retry/duplicate
-> delivery, bounded in payload, and explicitly non-authoritative until Planner
-> independently verifies durable repository evidence and records the required
-> decision.
+> Agent <-> Planner review communication should remove routine human relay in
+> both directions while remaining task-scoped, attributable, idempotent under
+> retry/duplicate delivery, bounded in payload, and explicitly subordinate to
+> durable repository authority.
 
 The protocol must work even when:
 
@@ -71,6 +79,102 @@ records.
 
 A role string inside a message is a routing claim, not cryptographic identity.
 T102 does not claim to solve cryptographic Agent authentication.
+
+## Task-Scoped Planner Rendezvous
+
+Automated delivery must **not** find Planner by fuzzy conversation search,
+recent-chat order, title similarity, or "the first Planner-looking thread".
+
+Every active review transaction that allows automated Planner contact must have
+one task/PR-scoped rendezvous record in that transaction's PR.
+
+The record is transient PR transaction state, not a second durable project
+registry:
+
+```text
+PLANNER_RENDEZVOUS
+protocol_version: agent-planner-notification-v1
+repository: <owner/repo>
+task: <Txxx or native work item>
+pull_request: <number/url>
+rendezvous_id: github-pr-comment:<comment_id>
+route_generation: <positive integer>
+planner_route: <opaque transport route/alias>
+status: ACTIVE
+supersedes: <prior rendezvous_id or none>
+```
+
+The route value is an opaque routing handle or stable transport alias, not a
+credential. Never publish authentication secrets, bearer tokens, or other
+credentials in GitHub.
+
+For STSRL tasks, Planner posts the initial rendezvous after publishing the task
+PR. A replacement Planner may supersede it only through an explicit handoff or
+user recovery action. The new record must name the prior rendezvous it
+supersedes and increment the route generation.
+
+Before **every** automated Planner delivery, the sender must re-read the task PR
+and resolve the latest unsuperseded ACTIVE rendezvous. Cached Planner routes are
+not sufficient.
+
+If there is no unique active rendezvous, fail closed to manual user routing.
+Do not probe arbitrary unrelated Planner conversations.
+
+### Route probe
+
+Before sending the first substantive request to a newly resolved route, the
+sender performs a lightweight transport probe:
+
+```text
+PLANNER_ROUTE_PROBE
+protocol_version: agent-planner-notification-v1
+rendezvous_id: github-pr-comment:<id>
+repository: <owner/repo>
+task: <task>
+pull_request: <pr>
+```
+
+The target Planner endpoint must answer:
+
+```text
+PLANNER_ROUTE_ACK
+rendezvous_id: github-pr-comment:<id>
+repository: <owner/repo>
+task: <task>
+pull_request: <pr>
+route_status: READY
+```
+
+The receiver must validate the PR/rendezvous before acknowledging. A Planner
+conversation that is unrelated, superseded, or unable to verify the named
+transaction must refuse/ignore the probe rather than accept traffic.
+
+A failed or mismatched probe does not authorize discovery of another arbitrary
+Planner thread. The sender stops and asks for rendezvous recovery.
+
+This is routing validation, not Planner authority or authentication.
+
+## Requester Return Rendezvous
+
+Every automated review request must also carry a return route for the exact
+requesting Agent/session so Planner can resume it after deciding.
+
+The durable request comment and compact direct envelope must include:
+
+```text
+requester_role: <Main Maintainer | native Implementer/reviewer>
+requester_route: <opaque transport route/alias>
+requester_instance: <opaque per-session nonce/identifier>
+```
+
+The requester route is scoped to this review transaction. The sender must not
+assume that a generic "Maintainer" search will rediscover the same waiting
+session later.
+
+Only non-secret routing identifiers may be persisted. If the transport cannot
+safely expose a resumable non-secret return route, that transport does not
+satisfy T102's automatic round-trip requirement and the workflow falls back to
+manual user relay.
 
 ## Authorized Routing
 
@@ -186,6 +290,66 @@ Optional fields may include:
 The direct message should normally contain no raw test log, full diff, large
 artifact dump, or long scientific argument. Planner retrieves those from the PR
 and repository as needed.
+
+## Planner Decision Response And Requester Resume
+
+The protocol is not complete when Planner merely writes a PR comment.
+
+After Planner reaches an authoritative decision under the existing workflow:
+
+1. Planner first records the authoritative decision on the task/native PR;
+2. Planner derives a durable response identity from that decision comment:
+
+   ```text
+   response_id = github-pr-comment:<planner-decision-comment-id>
+   ```
+
+3. Planner sends a compact response to the exact `requester_route` from the
+   request:
+
+   ```text
+   PLANNER_RESPONSE_NOTIFICATION
+   protocol_version: agent-planner-notification-v1
+   notification_id: github-pr-comment:<request-comment-id>
+   response_id: github-pr-comment:<planner-decision-comment-id>
+   repository: <owner/repo>
+   task: <task>
+   pull_request: <pr>
+   exact_head: <sha>
+   disposition: <SPEC_APPROVED | CHANGES_REQUESTED | DECISION_RECORDED | FINAL_ACCEPTED | ...>
+   requested_resume_action: <concise next action>
+   authority: durable_pr_decision
+   ```
+
+4. the receiving Agent wakes/resumes, fetches the durable decision comment and
+   current PR state, validates the exact head, and only then continues.
+
+The direct response is a wakeup pointer to durable authority; it is not the
+authority itself.
+
+Planner response delivery is also at-least-once. Retry reuses the same
+`response_id`. The requester must deduplicate repeated response notifications
+by that ID.
+
+The requester should acknowledge successful resume when the transport supports
+it:
+
+```text
+PLANNER_RESPONSE_ACK
+notification_id: github-pr-comment:<request-comment-id>
+response_id: github-pr-comment:<planner-decision-comment-id>
+requester_instance: <same requester instance>
+status: RESUMED
+```
+
+Lack of ACK never changes the durable Planner decision. Planner may retry the
+same response notification, but must not post a duplicate authoritative
+decision solely to wake the requester.
+
+A Maintainer may enter `WAITING_FOR_PLANNER` after sending a request only when
+its return route is resumable by the selected transport. A completed/stopped
+Agent session that cannot receive a routed response does not satisfy automatic
+round-trip operation.
 
 ## Context-Budget Rule
 
@@ -389,10 +553,15 @@ Implementer result
     -> compact direct Planner notification
     -> Planner receipt/deduplication
     -> independent Planner review
+    -> durable Planner decision comment
+    -> compact response to requester's exact return route
+    -> requester wakes, verifies durable decision, and resumes
 ```
 
 The Maintainer remains responsible for deciding whether an Implementer result
-actually requires Planner attention.
+actually requires Planner attention. Once it requests Planner action through
+the automated path, it must provide a resumable return route or use the manual
+user-relay fallback.
 
 ## Required Repository Changes
 
@@ -405,10 +574,15 @@ Implementation must at minimum:
 3. add a concise coding-agent summary to `AGENTS.md`;
 4. add or update documentation navigation as needed without creating a second
    normative source;
-5. provide copyable durable-request, direct-envelope, and Planner-receipt
-   templates;
-6. document the duplicate-Planner-branch election rule;
-7. document manual-user-request compatibility.
+5. provide copyable Planner-rendezvous, route-probe, durable-request,
+   direct-request, Planner-receipt, Planner-response, response-ack, and
+   reassignment templates;
+6. document how a sender resolves the unique current Planner route and fails
+   closed instead of searching arbitrary conversations;
+7. document requester return routes and automatic wake/resume after Planner
+   decisions;
+8. document the duplicate-Planner-branch election rule;
+9. document manual-user-request compatibility.
 
 A separate protocol document may be added if that keeps the authoritative
 workflow readable. If so, `collaboration_workflow.md` must clearly state which
@@ -422,9 +596,10 @@ text.
 
 Implementation may add a small helper or validation test if useful for:
 
-- formatting a notification envelope;
+- formatting request/response envelopes;
 - validating required fields;
-- deriving/checking notification comment IDs;
+- resolving a task-scoped rendezvous record;
+- deriving/checking notification and response comment IDs;
 - detecting duplicate Planner receipts in fixtures.
 
 Do not build:
@@ -443,11 +618,15 @@ Planner messaging mechanism.
 
 The landed protocol must explicitly walk through at least these scenarios:
 
-### Scenario A — normal final review
+### Scenario A — normal final review round trip
 
-Maintainer records exact-head final acceptance, posts one durable Planner review
-request, sends one compact notification, Planner claims the request, verifies,
-accepts, and merges.
+Maintainer resolves and probes the current task-scoped Planner rendezvous,
+records exact-head final acceptance, posts one durable Planner review request
+with its resumable return route, and sends one compact notification. Planner
+claims the request, verifies, records the durable final decision, sends one
+compact response to that exact Maintainer return route, and Maintainer wakes and
+verifies the durable decision. Planner then performs landing under the existing
+authority rules. No user relay is required in either direction.
 
 ### Scenario B — transport retry
 
@@ -486,6 +665,56 @@ decision. Conversation B must not take over from silence alone. After an
 explicit user recovery request or prior-owner release, B records a durable
 reassignment from receipt A to its receipt and then continues the review.
 
+### Scenario H — stale or wrong Planner route
+
+Maintainer resolves rendezvous R but the route probe is unanswered, mismatched,
+or reaches a conversation that cannot validate R/task/PR. Maintainer does not
+search for another "Planner" by name or recency. It stops automated delivery
+until Planner/user publishes an explicit superseding rendezvous.
+
+### Scenario I — Planner replied but Maintainer is waiting
+
+Maintainer is in `WAITING_FOR_PLANNER` on a resumable requester route. Planner
+records the durable decision and sends the response notification to that exact
+route. Maintainer wakes, fetches the PR decision, validates exact head, and
+continues without a user message.
+
+### Scenario J — Planner session handoff
+
+The active Planner conversation is intentionally replaced. The new Planner
+publishes a superseding rendezvous with incremented generation. A later
+Maintainer request re-resolves the PR and targets only the new route; the
+superseded Planner route is not used.
+
+## Live Round-Trip Canary
+
+Documentation or schema tests alone are not sufficient to claim that T102
+removed manual relay.
+
+Before final acceptance, exercise the proposed transport in a
+**non-authoritative protocol canary**:
+
+1. a Maintainer-side Agent publishes/resolves a task-scoped Planner rendezvous;
+2. it route-probes and sends a canary request carrying a resumable return route;
+3. the intended Planner conversation receives it without user relay;
+4. Planner posts a harmless canary response record and sends the response
+   notification to the exact requester route;
+5. the original Maintainer-side Agent wakes/resumes and acknowledges the
+   response without a user relay;
+6. one duplicate request delivery and one duplicate response delivery are
+   injected/retried and are deduplicated;
+7. a stale/superseded Planner route is rejected or fails closed rather than
+   silently routing to an unrelated Planner conversation.
+
+This canary may exercise the proposed transport before T102 lands because it
+carries **no task approval, acceptance, scientific authorization, or merge
+authority**. T102's own specification approval and final acceptance continue
+through the pre-T102/manual workflow.
+
+If the available transport cannot address and wake both exact endpoints, T102
+must not claim the success terminal. Document the missing transport capability
+and leave the task `INCOMPLETE` or amend the contract.
+
 ## Verification
 
 Required focused verification:
@@ -496,10 +725,17 @@ Required focused verification:
 - no wording implies that a notification itself grants approval or merge
   authority;
 - no wording allows STSRL Implementer to bypass Main Maintainer by default;
+- sender discovery uses only the unique task-scoped active Planner rendezvous,
+  never arbitrary Planner-conversation search;
+- route probing rejects stale/unrelated Planner endpoints;
+- every automated request contains a resumable requester return route;
+- Planner decision response wakes/resumes that exact requester without user
+  relay in the required live round-trip canary;
 - duplicate Planner branch scenario has a deterministic single-owner outcome;
 - a lost winning branch can recover only through explicit durable reassignment,
   never timeout-based claim stealing;
-- retries reuse the same notification ID;
+- request retries reuse the same notification ID and response retries reuse the
+  same response ID;
 - stale-head notification cannot authorize review/landing of a newer head;
 - manual user review requests remain supported;
 - notification mechanics have one detailed normative source rather than several
@@ -527,8 +763,11 @@ Use only when:
 
 - the role/routing boundary is explicit;
 - durable-source-first request identity is defined;
-- compact direct notification envelope is defined;
-- retry/idempotency semantics are defined;
+- a unique task-scoped Planner rendezvous and route-probe rule are defined;
+- compact direct request and response envelopes are defined;
+- requester return-route wake/resume is defined and passes the required live
+  round-trip canary;
+- retry/idempotency semantics exist independently for requests and responses;
 - duplicate Planner conversations deterministically converge to one review
   owner before authority is exercised;
 - lost-owner recovery requires explicit durable reassignment rather than a
@@ -548,6 +787,7 @@ T102 does not establish:
 
 - cryptographic Agent or session identity;
 - exactly-once message delivery;
+- universal discovery of a Planner when no active task-scoped rendezvous exists;
 - recovery of lost ChatGPT conversation history;
 - proof of which historical Planner branch authored an old GitHub comment;
 - automatic scientific approval;
@@ -566,6 +806,8 @@ Do not perform or authorize in T102:
 - task-result reinterpretation;
 - GitHub account/credential redesign;
 - ChatGPT/Codex product API changes;
+- guessing or scraping arbitrary unrelated Planner conversations when the
+  rendezvous is missing/stale;
 - custom authentication infrastructure;
 - a persistent message broker;
 - task execution concurrency changes;
@@ -582,6 +824,8 @@ that would:
 - give a notification authority by itself;
 - allow STSRL Implementer to bypass Main Maintainer by default;
 - remove durable PR anchoring;
+- remove task-scoped Planner rendezvous / route probing;
+- remove requester return-route wake/resume;
 - remove deterministic duplicate-Planner convergence;
 - change one-task-one-PR or dual-final-acceptance semantics;
 - grant automatic merge authority;
