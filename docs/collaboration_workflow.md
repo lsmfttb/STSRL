@@ -59,6 +59,43 @@ Maintainer may choose ordinary execution bindings that do not change task meanin
 Maintainer does not invent scientific semantics, acceptance meaning, information
 regime, promotion criteria, or successor science.
 
+### Planner Review Routing, Polling, And Resume
+
+For the capability-grounded Planner routing protocol, the
+[`T102 Phase-B contract`](tasks/T102-agent-planner-notification-protocol.md)
+and its same-ID [`resume-identity amendment`](tasks/T102-resume-operation-identity-amendment.md)
+are the single normative mechanics package. They own the route fields and byte
+serialization, candidate-resolution procedure, request/notification/response
+templates, polling loop, and resume-identity/completion rules. This section
+establishes the repository-wide authority and role boundaries without
+duplicating those mechanics.
+
+Use this protocol only after the Maintainer has verified the Implementer result
+and classified the next action as Planner-owned. Routine Implementer completion,
+ordinary test failures, progress updates, and other Maintainer-owned execution
+do not trigger Planner notifications. The Maintainer first records a durable,
+exact-head review request on the task PR, then resolves and notifies one current
+Planner route using the T102 procedure. Direct conversation is compact transport
+only; it cannot approve a specification, authorize work, accept a result, or
+authorize landing. Planner decisions and their exact-head/request correlation
+must be durable on the PR before Maintainer action.
+
+After delivery, the Maintainer remains in the same active turn and uses a
+task-specific bounded sleep/poll loop to reread PR head, route generation, and
+comments. There is no repository-wide polling interval or wait-budget default.
+A stale exact-head request stops for re-review; a superseding route invalidates
+the cached conversation and requires route resolution again. Do not turn an
+ordinary Planner wait into a detached-job heartbeat.
+
+Automatic follow-up is allowed only when the action has a stable operation
+identity and completion is idempotent or durably observable before retry. Check
+the completion predicate before performing or retrying the action, and record a
+completed response ACK only after durable completion evidence exists. This is
+not exactly-once transport or restart-safe Maintainer recovery. If routing,
+correlation, completion evidence, or the active turn is unavailable, fail closed
+and use explicit/manual recovery; never infer that a chat send or an ACK proves
+an unobserved action completed.
+
 ### Task Implementer
 
 After Maintainer records exact-spec `SPEC APPROVED` with

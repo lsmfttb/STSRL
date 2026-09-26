@@ -222,6 +222,12 @@ authoritative source and overrides shorter summaries elsewhere.
   a wait timeout is not completion, an empty thread projection is not proof of
   no work, and the Maintainer must read/verify the result and continue the
   authorized workflow before returning to the user.
+- After verifying Implementer work, route only genuine Planner-owned actions
+  through the durable PR request and the T102 protocol package linked from
+  [`docs/collaboration_workflow.md`](docs/collaboration_workflow.md). Chat is
+  notification-only; use bounded active-turn PR polling, and resume only with
+  durable completion evidence. Manual fallback remains required when routing or
+  completion is ambiguous; do not claim restart-safe recovery.
 - One task uses one fresh branch and one pull request based on latest `main`.
 - A ready-for-review pull request must satisfy the task's published
   deliverables, required artifacts, verification, and acceptance criteria.
