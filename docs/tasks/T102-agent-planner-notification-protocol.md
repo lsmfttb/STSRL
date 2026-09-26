@@ -1,32 +1,34 @@
-# T102: Planner Rendezvous, Review Notification, and Maintainer Resume Protocol
+# T102: Agent-Planner Transport Capability Discovery and Review Notification Protocol
 
 Artifact Eligibility Required: false
 
 ## Objective
 
-Establish a repository-wide review-notification protocol that removes routine
-manual user relay while using only capabilities that can be demonstrated in the
-actual Planner/Maintainer environments.
+T102 must first discover the **actual** cross-conversation capabilities available
+to the STSRL Main Maintainer / Codex environment before defining any automated
+Maintainer -> Planner routing protocol.
 
-The protocol must solve two separate problems:
+The task exists to remove routine user relay only when the real tool surface can
+support that safely.
 
-1. **request routing:** a Maintainer or accepted native-lane sender must be able
-   to identify the correct current Planner conversation and deliver one compact
-   review request without guessing among unrelated or superseded conversations;
-2. **requester continuation:** after Planner records the durable decision, the
-   requesting Maintainer must resume automatically without requiring Planner to
-   push a message into a Maintainer thread that Planner cannot address.
+T102 therefore has two phases:
 
-T102 therefore uses:
+1. **Phase A — capability discovery**
+   - Maintainer reports exactly how its environment can enumerate, identify,
+     read, address, and message Planner conversations, if at all;
+   - Maintainer reports how it can wait for / poll a durable Planner response
+     and resume work without user relay;
+   - no discovery algorithm is assumed in advance.
 
-- **direct Agent -> Planner notification** only after an exact task-scoped
-  Planner rendezvous has been resolved and live-proven;
-- **durable PR decision + Maintainer coordination heartbeat/polling** for the
-  Planner -> Maintainer return path.
+2. **Phase B — protocol implementation**
+   - Planner amends this same task contract using the demonstrated capabilities;
+   - Maintainer then performs ordinary exact-spec review;
+   - implementation proceeds only after the amended exact head receives
+     `SPEC APPROVED`.
 
-T102 is governance/tooling work only. It does not change simulator, native,
-Search, model, scientific-result, artifact-eligibility, or task-terminal
-semantics.
+T102 must not invent a thread ID, route handle, nonce-search mechanism,
+rendezvous registry, wakeup API, or Planner -> Maintainer push path that has not
+been demonstrated in the actual environment.
 
 ## Publication Baseline
 
@@ -34,630 +36,432 @@ Publication base:
 
 `main @ 1b9fd53b8708c0c328a795ca7ad87d4fe4648b99`
 
-Task PR:
+At publication there are no other open task PRs.
 
-`#118`
-
-Accepted predecessors:
+Accepted governance predecessors:
 
 - T100: `REPOSITORY_INFORMATION_ARCHITECTURE_COMPACTED`;
 - T101: `SUPPORTED_COHORT_INSUFFICIENT`.
 
-T101 PR #117 is only an attribution/duplicate-delivery ambiguity example. It is
-not classified as confirmed Agent impersonation or an unauthorized merge.
+T102 is governance/tooling work only. It does not change simulator, native,
+Search, training, scientific-result, artifact-eligibility, or scientific task
+semantics.
 
-## Capability Findings That Constrain The Design
+## Motivation
 
-T102 must not assume capabilities that were not demonstrated.
+The desired workflow is:
 
-At the Planner side used to publish this contract:
+```text
+Maintainer needs Planner action
+    -> Maintainer reaches the correct current Planner automatically
+    -> Planner reviews durable exact-head evidence
+    -> Planner records durable decision on the PR
+    -> Maintainer notices that durable decision and resumes automatically
+```
 
-- GitHub PR read/write/review/merge tools are available;
-- no effectful cross-thread `send_message`, `resume_thread`, or equivalent
-  tool is exposed to Planner;
-- Planner therefore cannot currently guarantee a direct push/wakeup into an
-  arbitrary Maintainer session.
+The current project already knows that user relay can work. T102 asks whether
+the same round trip can be made automatic with the tools that really exist.
 
-Consequently:
+Two questions must be answered before protocol design:
 
-- a Planner -> Maintainer direct return route is **not** a T102 requirement;
-- T102 must use a requester-owned waiting/polling mechanism for the return path;
-- future availability of a Planner-side direct-send tool may optimize the
-  protocol later, but T102 cannot depend on it.
+1. **How can Maintainer identify and message the correct current Planner?**
+2. **After Planner records a response, how can Maintainer resume without the
+   user manually saying "Planner replied"?**
 
-The existing sts_lightspeed workflow provides evidence that some Codex-side
-agents can discover/read other relevant threads and send direct review
-requests. T102 does not treat that as established for STSRL merely by
-assumption. The exact rendezvous discovery path must pass the live canary below
-before the success terminal can be claimed.
+The first question is not answered by writing "rendezvous" in a document. The
+mechanism must be demonstrated.
 
-## Core Authority Principle
+## Known Capability Boundary At Publication
 
-**Transport is not authority.**
+The current Planner tool surface has been inspected.
 
-A direct notification, heartbeat wakeup, thread discovery result, rendezvous
-record, or Planner receipt never by itself:
+Planner can:
 
-- approves a task specification;
-- authorizes implementation;
-- authorizes canary/formal scientific execution;
-- records Maintainer final acceptance;
-- records Planner final acceptance;
-- changes task meaning;
-- authorizes merge.
+- read and write GitHub PR comments;
+- independently inspect exact PR/head/repository evidence.
 
-Existing durable exact-head workflow rules remain authoritative.
+Planner currently cannot demonstrate an effectful tool that:
 
-## STSRL Role Routing
+- sends a message into an arbitrary Maintainer conversation/thread;
+- wakes/resumes a specific Maintainer session;
+- returns this Planner conversation's own stable thread/session identifier for
+  another Agent to address.
 
-Default route:
+Therefore Phase A must **not** assume Planner -> Maintainer push.
+
+The expected fallback, if Maintainer can message Planner but Planner cannot
+message Maintainer, is:
+
+```text
+Maintainer -> Planner direct notification
+Planner -> durable PR decision
+Maintainer -> heartbeat / bounded polling of PR -> resume
+```
+
+But even this fallback is not frozen until Maintainer demonstrates its actual
+discovery/send and polling capabilities.
+
+## Authority Boundary
+
+**Communication is not authority.**
+
+A direct message, thread discovery result, polling wakeup, GitHub comment
+notification, or future rendezvous mechanism must never by itself:
+
+- approve a task specification;
+- authorize implementation;
+- authorize scientific execution;
+- create Maintainer final acceptance;
+- create Planner final acceptance;
+- authorize a merge;
+- change task meaning;
+- create a second lifecycle registry.
+
+Existing exact-head workflow authority remains unchanged.
+
+## Phase A — Maintainer Capability Discovery
+
+Phase A is part of Maintainer feasibility/spec review. It is **not**
+implementation authorization.
+
+Maintainer may inspect its real Codex/Agent tool surface and perform harmless
+non-authoritative transport probes. It must not modify repository governance,
+task semantics, or scientific code during Phase A.
+
+### A1. Inter-conversation discovery inventory
+
+Maintainer must report the exact available operations/tools for all applicable
+capabilities:
+
+- list/enumerate conversations, threads, sessions, agents, or turns;
+- search/filter them;
+- read conversation metadata;
+- read message history or individual turns;
+- distinguish assistant-authored messages from user/tool/copied text;
+- obtain stable thread/session/host identifiers;
+- send a message to a specific existing conversation/thread;
+- determine whether sending wakes an idle/dormant conversation;
+- observe send/delivery failure;
+- inspect parent/child or project relationship metadata if available.
+
+For every relevant operation report:
+
+```text
+tool_or_operation:
+arguments_needed:
+identifier_returned_or_consumed:
+scope:
+can_read_message_roles: true|false
+can_target_exact_thread: true|false
+can_wake_target: true|false|unknown
+persistence_across_turns:
+important_limitations:
+```
+
+Use exact tool/operation names from the real environment. Do not paraphrase a
+capability that was not actually exposed.
+
+### A2. "Find the Planner" feasibility report
+
+Maintainer must answer, from observed capability rather than assumption:
+
+- What candidate universe can it search?
+- What stable identifier does a candidate Planner conversation expose?
+- Can it distinguish the current STSRL Planner from:
+  - an old/superseded STSRL Planner conversation;
+  - a Planner for another repository/project;
+  - an unrelated conversation containing copied task text;
+  - another branch created by duplicate user/network delivery?
+- Can it inspect message **roles**, or only text?
+- Can it search exact assistant-authored markers without confusing tool output
+  or quoted/copy-pasted text?
+- Can it address the selected conversation directly once found?
+- Can it prove a stale Planner route is stale?
+- If the active Planner changes, what observable signal could make Maintainer
+  stop using the old target?
+
+Maintainer must recommend the simplest discovery strategy supported by the
+actual tools.
+
+Possible outcomes include, but are not limited to:
+
+- direct exact thread/session ID supplied by the platform;
+- project-scoped thread enumeration plus exact metadata filtering;
+- a task/PR marker published in Planner conversation and resolved through
+  role-aware thread search;
+- no safe automated discovery mechanism.
+
+T102 does **not** prefer one outcome in advance.
+
+### A3. Harmless Planner discovery probe
+
+If Maintainer believes it can identify the current Planner, it must perform one
+non-authoritative live probe.
+
+The probe payload must contain:
+
+```text
+T102_PLANNER_DISCOVERY_PROBE
+
+task: T102
+pr: 118
+candidate_spec_head: <current exact head>
+probe_id: <fresh random id>
+authority: none
+request: acknowledge this probe only; do not approve or merge anything
+```
+
+Maintainer must report:
+
+- exact discovery operations used;
+- number of candidate conversations inspected;
+- number of matches;
+- exact non-secret target identifier, if safe to record;
+- why that target was considered the current Planner;
+- whether the message send succeeded;
+- whether the target was visibly awakened/responded;
+- any ambiguity.
+
+If the environment cannot safely identify exactly one target, do not guess and
+do not send. Report `PLANNER_DISCOVERY_UNPROVEN`.
+
+### A4. Maintainer waiting/resume capability
+
+Maintainer must report the actual mechanism available to avoid user relay after
+it sends a Planner request.
+
+Investigate at least:
+
+- whether the same Maintainer session can remain in a wait/sleep state;
+- whether a scheduled/heartbeat/thread-automation wakeup exists;
+- whether a bounded loop can poll PR comments/state;
+- whether the session can resume execution after a poll observes a matching
+  Planner decision;
+- what happens if the Maintainer turn/session terminates;
+- practical minimum/normal polling cadence;
+- how duplicate polls/restarts would avoid duplicate follow-up actions.
+
+A valid design may use polling. Planner -> Maintainer direct push is not
+required.
+
+If the actual environment cannot preserve or resume a Maintainer workflow
+without user input, report `MAINTAINER_AUTO_RESUME_UNPROVEN`.
+
+### A5. Phase-A durable report
+
+Maintainer must post one PR comment:
+
+```text
+T102 CAPABILITY DISCOVERY REPORT
+
+task: T102
+reviewed_spec_head: <exact head>
+
+planner_discovery:
+  status: PROVEN | UNPROVEN | AMBIGUOUS
+  exact_operations: ...
+  candidate_scope: ...
+  stable_target_identifier: ...
+  role_awareness: ...
+  send_capability: ...
+  wake_behavior: ...
+  stale_target_detection: ...
+  replacement_strategy_possible: ...
+
+maintainer_resume:
+  status: PROVEN | UNPROVEN
+  mechanism: ...
+  polling_source: ...
+  cadence_or_trigger: ...
+  same_workflow_resumes: ...
+  duplicate_suppression: ...
+
+live_probe:
+  attempted: true|false
+  probe_id: ...
+  target_identifier: ...
+  outcome: ...
+
+recommended_protocol:
+  ...
+
+blockers:
+  ...
+```
+
+The report must distinguish observed facts from recommendations.
+
+## Phase-A Decision Gate
+
+After the capability report, **Planner decides the Phase-B architecture**.
+
+Maintainer must not record `SPEC APPROVED` for protocol implementation before
+Planner amends this task contract to a concrete mechanism based on the report.
+
+Possible Planner decisions:
+
+### Case 1 — discovery + send are proven; polling/resume is proven
+
+Planner may freeze:
+
+```text
+Maintainer -> exact Planner direct message
+Planner -> durable PR decision
+Maintainer -> polling/heartbeat -> resume
+```
+
+No Planner -> Maintainer push is required.
+
+### Case 2 — discovery/send are proven; automatic Maintainer resume is not
+
+T102 cannot claim removal of user relay in both directions. Planner may either:
+
+- amend the goal to one-way notification only; or
+- leave T102 incomplete until a viable resume mechanism exists.
+
+### Case 3 — safe Planner discovery is not proven
+
+Do not implement a fuzzy "find Planner" heuristic.
+
+Planner may choose a different architecture, for example:
+
+- user-supplied explicit Planner handle when one exists;
+- PR-only polling with no direct Planner wakeup;
+- an external supported coordination mechanism;
+- `INCOMPLETE` if no safe automation exists.
+
+### Case 4 — exact platform route exists
+
+If Maintainer discovers a real platform-issued exact Planner
+thread/session/agent handle, prefer that over an invented marker/search
+protocol, subject to replacement and stale-handle behavior being understood.
+
+## Phase B — Protocol Requirements
+
+These requirements are intentionally abstract until Phase A completes.
+
+The amended Phase-B contract must define, using demonstrated capabilities:
+
+1. how the requester identifies the current Planner;
+2. how Planner replacement invalidates the old target;
+3. how the request is anchored to durable PR evidence;
+4. how duplicate/retried request delivery is deduplicated;
+5. how Planner independently verifies exact head before authority;
+6. how Planner records the durable response;
+7. how Maintainer notices the response and resumes;
+8. how stale-head, stale-Planner, duplicate-conversation, and restart cases fail
+   closed;
+9. how manual user relay remains a valid fallback;
+10. how payload size is bounded so Planner context is not polluted.
+
+Do not create a second task database or lifecycle registry.
+
+## Role Routing
+
+For STSRL, preserve:
 
 ```text
 Task Implementer -> Main Maintainer -> Planner
 ```
 
-The STSRL Implementer does not bypass the Main Maintainer merely because
-cross-thread communication exists.
+Task Implementer does not bypass Main Maintainer merely because direct Planner
+messaging may exist.
 
-The Main Maintainer may notify Planner only when Planner action is required,
-including:
+For an external native lane such as `sts_lightspeed`, direct notification by
+the role already assigned to independent Planner/native review may remain
+allowed if that repository's workflow permits it.
 
-- exact-spec review;
-- a real semantic/architecture decision outside Maintainer freedom;
-- final governance/scientific/architecture review;
-- a genuine exceptional authority/landing question.
+T102 does not change those authority assignments.
 
-Routine implementation progress, test output, job progress, and
-Maintainer-owned diagnostics are not Planner notifications.
+## T101 Attribution Example
 
-An accepted external native workflow may keep its existing direct native
-Implementer/reviewer -> Planner semantic-review route where that workflow
-already assigns Planner the review.
+T101 PR #117 remains only an example of ambiguous conversation attribution.
 
-Manual user relay always remains a valid fallback.
+The project does not claim that a Maintainer or Agent impersonated Planner.
+Duplicate user delivery / network-created Planner branches are a plausible
+explanation.
 
-## Planner Rendezvous: Concrete Meaning
+T102 should solve future routing/retry ambiguity without rewriting T101
+history.
 
-A rendezvous is **not** a thread ID supplied by Planner.
+## Required Repository Changes After Phase-A Amendment
 
-Planner cannot currently read or publish its own thread/session identifier from
-the available tool surface.
+Only after Planner freezes Phase B, implementation may update:
 
-Instead, a rendezvous consists of:
+- `docs/collaboration_workflow.md`;
+- `docs/implementer_coordination.md`;
+- concise `AGENTS.md` reminders;
+- one detailed notification/coordination document if useful;
+- minimal helper/tests only if the demonstrated transport benefits from them.
 
-1. one high-entropy random `rendezvous_nonce`;
-2. one machine-searchable **assistant-authored endpoint assertion** containing
-   that nonce in the active Planner conversation;
-3. one durable PR comment that names the same nonce, route generation, and
-   SHA-256 of the canonical assertion text.
-
-Canonical active-conversation assertion:
-
-```text
-PLANNER_ENDPOINT_ASSERTION
-protocol_version: agent-planner-notification-v1
-repository: <owner/repo>
-task: <task>
-pull_request: <pr>
-route_generation: <positive integer>
-rendezvous_nonce: <random UUID/nonce>
-status: ACTIVE
-```
-
-Durable PR record:
-
-```text
-PLANNER_RENDEZVOUS
-protocol_version: agent-planner-notification-v1
-repository: <owner/repo>
-task: <task>
-pull_request: <pr>
-route_generation: <positive integer>
-rendezvous_nonce: <same nonce>
-assertion_sha256: <sha256 of canonical assertion text>
-status: ACTIVE
-supersedes: <prior rendezvous comment id or none>
-```
-
-The PR comment is transient task-transaction state, not a second durable task
-registry.
-
-The nonce is a routing discriminator, not a secret credential and not
-cryptographic authentication.
-
-## How A Sender Finds The Correct Planner
-
-Before every direct Planner notification, the sender must:
-
-1. re-read the task PR;
-2. resolve the latest valid `PLANNER_RENDEZVOUS` generation;
-3. discard any cached Planner thread if the generation/nonce changed;
-4. use its available Codex inter-thread discovery/read tools to locate
-   conversations containing the exact nonce;
-5. require **exactly one** candidate conversation containing the exact canonical
-   `PLANNER_ENDPOINT_ASSERTION` as an assistant-authored message;
-6. canonicalize that assertion and require its SHA-256 to equal
-   `assertion_sha256` from the PR;
-7. only then use the discovered thread identifier/handle to send the compact
-   review request.
-
-If there are zero matches, multiple matches, no way to distinguish
-assistant-authored content from copied/tool-output text, or the assertion hash
-does not match, automated routing fails closed.
-
-Do not:
-
-- choose the most recent "Planner";
-- search by conversation title only;
-- choose the first thread that looks related;
-- continue using an old cached Planner thread after rendezvous generation
-  changes;
-- probe arbitrary conversations until one responds.
-
-The live canary must demonstrate the actual discovery tool sequence available
-to the sender. If the current Codex environment cannot perform this exact
-resolution, T102 must not claim that automated Planner discovery is solved.
-
-## Planner Handoff / Replacement
-
-Planner replacement is explicit.
-
-A new Planner conversation must:
-
-1. generate a new random nonce;
-2. emit the new canonical `PLANNER_ENDPOINT_ASSERTION` in that new
-   conversation;
-3. post a new PR `PLANNER_RENDEZVOUS` with generation incremented by one and
-   `supersedes` naming the prior rendezvous comment.
-
-The old assertion remains historical evidence but is no longer routable.
-
-Every sender re-reads the PR before every substantive delivery, so a generation
-change invalidates its cached old Planner thread.
-
-Immediately before recording an authoritative Planner decision, Planner must
-also re-read the rendezvous and verify that its own assertion/generation is
-still current. A decision posted after its Planner generation was superseded is
-not a valid new Planner decision for that request and must be re-reviewed by
-the current Planner.
-
-A Planner decision recorded while its generation was current remains durable;
-a later handoff does not retroactively invalidate it.
-
-If rendezvous state is ambiguous, fall back to explicit user recovery rather
-than guessing.
-
-## Durable Review Request
-
-Every automated request must first be anchored as a PR comment.
-
-Required fields:
-
-```text
-PLANNER_REVIEW_REQUEST
-protocol_version: agent-planner-notification-v1
-sender_role: <Main Maintainer | accepted native sender>
-repository: <owner/repo>
-task: <task>
-pull_request: <pr>
-phase: <SPEC_REVIEW | MATERIAL_DECISION | FINAL_REVIEW | NATIVE_REVIEW | EXCEPTION>
-exact_head: <40-char SHA>
-rendezvous_generation: <generation>
-rendezvous_nonce: <nonce>
-requested_action: <one concise action>
-material_delta: <short summary>
-evidence_anchor: <durable PR evidence ids/paths>
-authority: notification_only
-```
-
-The GitHub comment ID is the request identity:
-
-```text
-notification_id = github-pr-comment:<request-comment-id>
-```
-
-Transport retry must reuse this same notification ID. A timeout does not create
-a new durable request.
-
-If exact head, requested action, or material evidence boundary changes, create a
-new durable request after the required review.
-
-## Direct Agent -> Planner Envelope
-
-After resolving the current rendezvous, the sender may send:
-
-```text
-PLANNER_NOTIFICATION
-protocol_version: agent-planner-notification-v1
-notification_id: github-pr-comment:<id>
-repository: <owner/repo>
-task: <task>
-pull_request: <pr>
-phase: <phase>
-exact_head: <sha>
-rendezvous_generation: <generation>
-rendezvous_nonce: <nonce>
-requested_action: <concise action>
-evidence_anchor: <durable PR request comment>
-authority: notification_only
-```
-
-The message is intentionally small. Do not copy full logs, full diffs, long
-scientific arguments, or task history into the Planner thread.
-
-The repository/PR remains the review context.
-
-## Duplicate Direct Delivery
-
-Direct request transport is at-least-once.
-
-Before substantive review, Planner must:
-
-1. fetch the durable request;
-2. verify current PR/head/rendezvous;
-3. check whether a Planner decision already exists for that request/head.
-
-If unresolved, Planner may record:
-
-```text
-PLANNER_REVIEW_RECEIPT
-notification_id: github-pr-comment:<id>
-rendezvous_generation: <generation>
-exact_head: <sha>
-review_nonce: <opaque per-conversation nonce>
-status: CLAIMED
-```
-
-If transport/network branching somehow delivers one request to more than one
-Planner conversation sharing the same current rendezvous, the lowest GitHub
-receipt-comment ID owns the review. Other branches stop before authoritative
-decision or merge.
-
-If endpoint discovery itself finds multiple exact assertion matches, do not use
-receipt election as an excuse to guess. Fail closed and publish a fresh Planner
-rendezvous for the intended branch.
-
-## Planner Review And Durable Decision
-
-Receiving a notification only authorizes Planner to inspect.
-
-Planner independently verifies the required durable evidence, including as
-appropriate:
-
-- PR/base/head;
-- task contract;
-- Maintainer review record;
-- changed files/diff;
-- current `main`;
-- scientific/provenance evidence.
-
-Planner records the authoritative decision as the existing workflow requires.
-
-A Planner decision comment responding to an automated request should include:
-
-```text
-notification_id: github-pr-comment:<request-comment-id>
-rendezvous_generation: <current generation>
-exact_head: <sha>
-```
-
-This lets the requester distinguish the intended durable response from unrelated
-comments.
-
-## Maintainer Resume: Polling, Not Planner Push
-
-After sending the request, Main Maintainer must not terminate and require the
-user to say "Planner replied" if its Codex environment supports recurring
-coordination waits.
-
-It enters:
-
-`WAITING_FOR_PLANNER`
-
-and uses a **coordination heartbeat / thread automation / bounded sleep-poll
-loop** attached to its own Maintainer conversation.
-
-Each wakeup polls the PR for:
-
-- a Planner decision matching its `notification_id`, exact head, and current
-  rendezvous generation;
-- a Planner `CHANGES_REQUESTED`/material-decision response;
-- PR head movement;
-- rendezvous supersession;
-- PR closure/merge or other transaction-ending state.
-
-On a matching durable Planner decision, Maintainer resumes the same workflow,
-re-fetches current PR/head, validates the decision, and continues.
-
-This is distinct from an experiment heartbeat. T102 must update existing
-coordination documentation so that "ordinary Planner waits" may use a
-coordination heartbeat without being confused with long-running scientific-job
-heartbeat semantics.
-
-Polling cadence is an operational choice. It must be bounded and avoid
-busy-waiting. Duplicate wakeups must be harmless.
-
-If the Maintainer environment cannot schedule/resume the same thread or keep a
-bounded wait loop alive, automated round-trip communication is not available in
-that environment; fall back to manual user relay.
-
-## Planner Replacement While Maintainer Waits
-
-The Maintainer heartbeat always re-reads current rendezvous state.
-
-If generation changes before a valid decision exists:
-
-1. discard the cached old Planner thread;
-2. resolve the new nonce/assertion;
-3. re-send the **same durable request identity** to the new Planner only when
-   request/head/material evidence are unchanged;
-4. continue waiting.
-
-Do not create a duplicate PR request solely because Planner changed.
-
-If a valid durable Planner decision was recorded before supersession, consume
-that decision and do not re-request it.
-
-## Existing Decision Recovery
-
-A surviving or newly discovered Planner should prefer durable decisions over
-chat memory.
-
-For the same request/head:
-
-- existing valid Planner acceptance => do not repeat acceptance;
-- existing changes-requested => wait for a new request/material head;
-- already merged => at most bounded post-merge verification;
-- unavailable historical chat attribution alone does not invalidate durable
-  correct evidence.
-
-## Required End-To-End Scenarios
-
-### A. Normal round trip
-
-Maintainer resolves current Planner nonce -> sends one durable/direct request ->
-enters coordination heartbeat -> Planner reviews and posts durable decision ->
-Maintainer heartbeat observes it and resumes without user relay.
-
-### B. Request retry
-
-Direct send result is uncertain -> same notification ID is resent to the same
-current rendezvous -> Planner deduplicates.
-
-### C. Wrong/irrelevant Planner conversation
-
-Thread discovery returns a conversation with task-like text but no exact
-assistant-authored assertion/hash -> reject it.
-
-### D. Planner replacement
-
-Generation 1 Planner is replaced -> generation 2 Planner emits a new nonce and
-superseding PR rendezvous -> Maintainer re-reads PR, discards cached generation
-1 thread, finds only generation 2, and routes there.
-
-### E. Planner branch ambiguity
-
-Discovery finds two exact assertion matches -> do not choose one by recency ->
-explicitly establish a new rendezvous for the intended surviving Planner.
-
-### F. Stale head
-
-Request names H but PR is H2 -> Planner does not approve H2 from H's request ->
-sender performs required review and creates a new request.
-
-### G. Already resolved
-
-A duplicate Planner delivery occurs after a valid durable decision -> recipient
-observes the decision and performs no duplicate acceptance or merge.
-
-### H. STSRL Implementer needs Planner input
-
-Implementer reports to Maintainer -> Maintainer classifies -> only Maintainer
-sends Planner request when truly Planner-owned.
-
-## Live Capability Canary Required Before Success
-
-T102 cannot succeed from prose alone.
-
-Before final acceptance, perform a non-authoritative live canary using the
-actual current environments.
-
-Planner side:
-
-1. current Planner emits a fresh endpoint assertion in its active conversation;
-2. Planner posts the matching PR rendezvous comment.
-
-Maintainer side:
-
-3. Maintainer independently re-reads the PR;
-4. using the actual Codex thread discovery/read tools available to it,
-   Maintainer finds exactly one conversation matching the nonce and assistant
-   assertion hash;
-5. Maintainer sends a harmless canary notification to that discovered thread;
-6. Maintainer enters its proposed coordination heartbeat/polling state.
-
-Planner side:
-
-7. the intended Planner conversation receives the canary without user relay;
-8. Planner writes a harmless durable canary response comment on the PR.
-
-Maintainer side:
-
-9. heartbeat/polling wakes the original Maintainer conversation;
-10. it finds the canary response and posts an ACK without user relay.
-
-Also test:
-
-- one duplicate request send;
-- one unrelated/stale Planner thread that must not match;
-- one superseding rendezvous generation, after which the old cached route is
-  rejected.
-
-The canary carries no spec approval, final acceptance, scientific authorization,
-or merge authority.
-
-If either exact Planner discovery or Maintainer heartbeat resume cannot be
-demonstrated, leave T102 `INCOMPLETE` or amend the design. Do not claim success
-from mocked/document-only tests.
-
-## Required Repository Changes
-
-Implementation must at minimum:
-
-1. update `docs/collaboration_workflow.md` with the authoritative request,
-   rendezvous, polling, and authority rules;
-2. update `docs/implementer_coordination.md` to distinguish coordination
-   heartbeat from experiment/job heartbeat and define WAITING_FOR_PLANNER;
-3. add a concise summary to `AGENTS.md`;
-4. add one detailed protocol document if useful, with the workflow remaining
-   the authority index;
-5. provide copyable templates for:
-   - endpoint assertion;
-   - PR rendezvous;
-   - durable review request;
-   - direct notification;
-   - Planner receipt;
-   - durable Planner decision binding;
-   - Maintainer wait/poll/ACK;
-6. document Planner handoff/supersession;
-7. document manual user fallback.
-
-Prefer one detailed normative source plus short references.
-
-## Optional Lightweight Tooling
-
-Small helpers/tests may support:
-
-- canonical endpoint assertion serialization and SHA-256;
-- rendezvous generation resolution;
-- PR request/decision matching;
-- duplicate notification detection;
-- heartbeat polling state.
-
-Do not build:
-
-- a task database;
-- a message broker;
-- an authentication service;
-- a large workflow engine;
-- a second task state machine.
-
-## Verification
-
-Required focused verification:
-
-- task/document guards pass;
-- links resolve;
-- one-task-one-PR authority remains unchanged;
-- notifications/rendezvous never grant authority themselves;
-- STSRL Implementer does not bypass Maintainer;
-- Planner discovery requires exact current generation + nonce +
-  assistant-authored assertion hash;
-- ambiguous or missing rendezvous fails closed;
-- old cached Planner thread is invalid after generation changes;
-- Planner decision must bind request ID/head/current generation;
-- Maintainer wait resumes from durable PR decision without user relay in the
-  live canary;
-- duplicate request send is idempotent;
-- manual user relay remains valid;
-- no unsupported Planner -> Maintainer direct-send capability is assumed.
-
-If helper Python is added:
-
-```bash
-pytest <focused tests>
-python -m compileall -q src tests
-ruff check <changed Python files>
-ruff format --check <changed Python files>
-```
-
-Report the supported repository doc/test suite result used for final acceptance.
-
-## Terminal Classification
-
-Success terminal:
-
-`AGENT_PLANNER_REVIEW_RENDEZVOUS_ESTABLISHED`
-
-Use only if:
-
-- the current Planner can concretely publish a nonce/assertion rendezvous;
-- the actual sender environment can resolve exactly that current Planner;
-- Planner handoff/supersession changes future routing to the new Planner;
-- request delivery is durable-first and idempotent;
-- Maintainer can remain/re-enter WAITING_FOR_PLANNER and detect the durable
-  Planner response without user relay;
-- live canary demonstrates the complete round trip;
-- notification versus authority remains explicit;
-- existing exact-head acceptance/merge rules are unchanged.
-
-If the current product/tool surfaces cannot satisfy the live canary, T102 is
-`INCOMPLETE`; do not replace missing capability with a fictional route field.
-
-## Explicit Non-Claims
-
-T102 does not establish:
-
-- cryptographic Planner identity;
-- exactly-once message delivery;
-- Planner-side arbitrary cross-thread send/resume capability;
-- universal discovery when no valid rendezvous exists;
-- recovery of lost chat history;
-- proof of which historical branch authored an old comment;
-- automatic scientific approval;
-- automatic merge authority;
-- a requirement to stop using manual user relay.
+Prefer one detailed normative source and references from other docs.
 
 ## Out Of Scope
 
-Do not perform or authorize:
+Do not perform or authorize in T102:
 
-- simulator/native/Search/model work;
+- simulator/native/Search/model changes;
 - scientific experiments;
-- T101 reinterpretation;
-- external authentication infrastructure;
 - ChatGPT/Codex product API changes;
-- guessing unrelated Planner conversations;
-- weakening exact-head dual acceptance.
+- invented cross-thread APIs;
+- credential/token publication;
+- a custom authentication service;
+- a persistent message broker;
+- a large workflow engine;
+- fuzzy routing to "the most likely Planner";
+- weakening exact-head dual final acceptance.
 
-## Execution Freedom And Material Changes
+## Phase-A Verification
 
-Maintainer/Implementer may choose:
+Before Planner freezes Phase B, require:
 
-- exact documentation layout;
-- concrete Codex discovery commands available in their environment;
-- heartbeat cadence/backoff;
-- helper/test structure.
+- exact current PR/head is recorded;
+- exact real tool/operation names are reported;
+- unsupported capabilities are explicitly marked unavailable/unknown;
+- a harmless live discovery probe is attempted only if unique safe targeting is
+  believed possible;
+- no arbitrary Planner conversation is contacted after ambiguous discovery;
+- Maintainer waiting/polling capability is tested or explicitly reported
+  unavailable;
+- no `SPEC APPROVED` is posted for implementation yet.
 
-Planner amendment and renewed exact-spec approval are required if implementation
-would:
+## Terminal Classification
 
-- replace nonce/assertion discovery with fuzzy Planner search;
-- assume a Planner-side direct return-send capability not demonstrated here;
-- remove live discovery/polling canary;
-- allow STSRL Implementer to bypass Maintainer;
-- grant notification/heartbeat authority;
-- alter one-task-one-PR or exact-head acceptance semantics;
-- add a new external service/credential.
+T102 does not have a success terminal until Phase B is amended.
+
+During Phase A, the task remains `READY` / in review.
+
+After Planner receives the capability report, Planner must amend this section
+with the concrete Phase-B success terminal and acceptance checks.
+
+If no safe architecture can satisfy the desired automation, Planner may define
+an `INCOMPLETE` terminal rather than pretending unsupported transport exists.
 
 ## Acceptance And Authorization Boundary
 
-Publishing/amending T102 does not authorize implementation.
+Current publication authorizes only:
 
-Maintainer must independently review the exact contract head and record:
+- Maintainer independent review of this discovery contract;
+- inspection of its real coordination tool surface;
+- harmless non-authoritative Phase-A probes;
+- the durable `T102 CAPABILITY DISCOVERY REPORT`.
+
+It does **not** authorize repository implementation of the final protocol.
+
+After Phase A:
+
+1. Planner amends this task contract with the concrete Phase-B mechanism;
+2. Maintainer independently reviews the new exact head;
+3. only then may Maintainer record:
 
 ```text
 SPEC APPROVED
 
 task: T102
-approved_spec_commit: <exact full SHA>
+approved_spec_commit: <amended exact full SHA>
 implementation_authorized: true
 ```
 
-Final landing requires Maintainer final implementation/operational acceptance
-and Planner final governance/architecture acceptance on the same exact final
-head.
-
-T102 itself continues to use the pre-T102/manual review path for authoritative
-spec/final approval. Non-authoritative capability canary traffic is allowed
-solely to prove the transport assumptions.
+Final landing still requires Maintainer final implementation/operational
+acceptance and Planner final governance/architecture acceptance on the same
+exact final head.
