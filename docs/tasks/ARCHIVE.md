@@ -110,6 +110,7 @@ duplicate long experiment reports.
 | T100 | DONE | [Repository Information-Architecture Compaction](T100-repository-information-architecture-compaction.md) | T099, current governance | `REPOSITORY_INFORMATION_ARCHITECTURE_COMPACTED`; documentation only |
 | T101 | DONE | [Bounded Particle-Count Convergence and Cost Diagnostic](T101-bounded-particle-count-convergence.md) | T004, T078, T081, T087, T088, T096, T098, T099, T100 | `SUPPORTED_COHORT_INSUFFICIENT`; N=2 admission attempted all 413 candidates (A/B/C 93/192/128), admitted 0; no canary/formal run or convergence result |
 | T102 | DONE | [Metadata-Current Planner Routing and Maintainer Polling Protocol](T102-agent-planner-notification-protocol.md) | T100, T101, current governance | `AGENT_PLANNER_REVIEW_ROUTING_ESTABLISHED`; metadata-current selection, durable PR response, active-turn polling, idempotent resume; no restart-safe recovery claim |
+| T103 | READY | [Natural Battle-Start Particle/Search Support-Domain Failure Taxonomy](T103-particle-search-support-domain-failure-taxonomy.md) | T081, T087, T088, T098, T099, T101, T102 | diagnostic only; explain 0/413 T101 N=2 support without repair or convergence |
 
 ## Same-ID contract and amendment files
 
