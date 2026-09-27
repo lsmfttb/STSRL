@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-09-25.
+Last updated: 2026-09-27.
 
 This is the compact, merge-stable projection of the accepted project state on
 `main`. It answers what is true now; it does not narrate a PR's approval or
@@ -116,6 +116,20 @@ record for detailed provenance. The terminal retention manifest is retained
 under `artifacts/t101-bounded-particle-convergence-361a77d/admission/`
 (`t101-terminal-retention-manifest-v1`, SHA-256
 `922ef003d2fa15dea57f59c71fa99bfb6f5a418d48026b04ed3019d7e6cf4f97`).
+
+T103 replayed that exact ordered population with the frozen N=2,
+Search-v2@400, no-potion configuration. Its terminal is
+`SUPPORT_DOMAIN_FAILURE_TAXONOMY_ESTABLISHED`, with zero admitted candidates:
+70 have directly observed public-projection parity failure during bridge-report
+checking (A/B/C 4/3/63), and 343 remain `OPAQUE_BRIDGE_FAILURE`
+(A/B/C 89/189/65). The repaired pre-bridge context/action checks passed for all
+413 candidates. The 70 returned reports establish that mapping and Search were
+reached; those stages remain unknown for the 343 opaque exceptions. No valid
+finite required root report was established. These are observable boundary
+counts, not a fully localized root cause or convergence result; the earlier
+three-candidate mapping diagnosis is not generalized. See the
+[T103 execution record](tasks/support/T103/maintainer-execution.md) for exact
+producer, retained hashes, resource cost and limitations.
 
 No successor task is authorized by this result. T063 and T066 remain non-active
 scientific directions; see [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md) for their
