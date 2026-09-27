@@ -37,7 +37,7 @@ duplicate long experiment reports.
 | T026 | DONE | [Guidance checkpoint inference contract](T026-guidance-checkpoint-inference-contract.md) | T009, T011, T016, T018, T024 | checkpoint scorer contract |
 | T027 | DONE | [Teacher guidance calibration report](T027-teacher-guidance-calibration-report.md) | T026 | checkpoint-vs-teacher calibration |
 | T028 | DONE | [Model-guided Oracle search controller](T028-model-guided-oracle-search-controller.md) | T025, T026, T027 | versioned Oracle-like search controller |
-| T029 | DONE | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source/equal-budget comparison |
+| T029 | DONE | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source comparison |
 | T030 | DONE | [M1 model-guided search sandbox synthesis](T030-m1-model-guided-search-sandbox-synthesis.md) | T027, T029 | milestone synthesis and next task batch |
 | T031 | DONE | [A20 coverage refresh and data gap report](T031-a20-coverage-refresh-data-gap-report.md) | T030 | post-M1 A20 coverage refresh |
 | T032 | DONE | [A20 narrow teacher and checkpoint diagnostic refresh](T032-a20-teacher-checkpoint-refresh.md) | T039 | narrow source-contract diagnostic |
@@ -111,6 +111,7 @@ duplicate long experiment reports.
 | T101 | DONE | [Bounded Particle-Count Convergence and Cost Diagnostic](T101-bounded-particle-count-convergence.md) | T004, T078, T081, T087, T088, T096, T098, T099, T100 | `SUPPORTED_COHORT_INSUFFICIENT`; N=2 admission attempted all 413 candidates (A/B/C 93/192/128), admitted 0; no canary/formal run or convergence result |
 | T102 | DONE | [Metadata-Current Planner Routing and Maintainer Polling Protocol](T102-agent-planner-notification-protocol.md) | T100, T101, current governance | `AGENT_PLANNER_REVIEW_ROUTING_ESTABLISHED`; metadata-current selection, durable PR response, active-turn polling, idempotent resume; no restart-safe recovery claim |
 | T103 | DONE | [Natural Battle-Start Particle/Search Support-Domain Failure Taxonomy](T103-particle-search-support-domain-failure-taxonomy.md) | T081, T087, T088, T098, T099, T101, T102 | `SUPPORT_DOMAIN_FAILURE_TAXONOMY_ESTABLISHED`; exact 413-record replay admitted 0; projection parity failure 70, opaque bridge failure 343; no native repair or convergence; [evidence](support/T103/maintainer-execution.md) |
+| T104 | READY | [Particle-Bridge Failure Localization and Native Observability Gate](T104-particle-bridge-failure-localization.md) | T081, T098, T099, T101, T103 | localize 70 projection failures and 343 opaque bridge failures; diagnosis only; no repair or convergence |
 
 ## Same-ID contract and amendment files
 
