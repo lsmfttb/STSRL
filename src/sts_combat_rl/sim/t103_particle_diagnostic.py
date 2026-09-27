@@ -21,6 +21,7 @@ from sts_combat_rl.commands.t085_native_execution import (
     restore_t085_canonical_record,
 )
 from sts_combat_rl.sim.public_run_context import (
+    PublicProjectionCandidateParityError,
     build_public_run_context,
     read_native_public_projection,
 )
@@ -440,8 +441,14 @@ class T103NativeRecordRunner:
                     actions,
                     projection=projection,
                     history=history,
-                    include_candidates=False,
                 )
+            except PublicProjectionCandidateParityError as parity_exc:
+                row["public_projection_parity_status"] = "failed"
+                evidence["public_projection_parity"] = False
+                exc = parity_exc
+                raise _T103ObservedBoundary(
+                    "native projection candidate surface differs"
+                ) from parity_exc
             except Exception as projection_exc:
                 exc = projection_exc
                 evidence["observation_failed"] = True
@@ -452,12 +459,12 @@ class T103NativeRecordRunner:
             expected_without_candidates = {
                 key: value
                 for key, value in expected.items()
-                if key not in {"candidate_actions", "missing_fields"}
+                if key != "candidate_actions"
             }
             actual_without_candidates = {
                 key: value
                 for key, value in projection_context.items()
-                if key not in {"candidate_actions", "missing_fields"}
+                if key != "candidate_actions"
             }
             if actual_without_candidates != expected_without_candidates:
                 row["public_projection_parity_status"] = "failed"
@@ -466,22 +473,8 @@ class T103NativeRecordRunner:
             row["public_projection_parity_status"] = "matched"
             evidence["public_projection_parity"] = True
 
-            try:
-                action_context = build_public_run_context(
-                    restored.raw,
-                    actions,
-                    projection=None,
-                    history=history,
-                )
-            except Exception as action_exc:
-                exc = action_exc
-                evidence["observation_failed"] = True
-                raise _T103ObservedBoundary(
-                    "legal action observation failed"
-                ) from action_exc
-
             expected_actions = expected.get("candidate_actions")
-            actual_actions = action_context.get("candidate_actions")
+            actual_actions = projection_context.get("candidate_actions")
             if actual_actions != expected_actions:
                 row["ordered_legal_action_parity_status"] = "failed"
                 evidence["ordered_legal_action_parity"] = False

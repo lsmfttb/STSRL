@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,14 @@ import pytest
 import sts_combat_rl.commands.t103_particle_diagnostic as t103_command
 import sts_combat_rl.sim.t101_particle_convergence as t101
 import sts_combat_rl.sim.t103_particle_diagnostic as t103
+from sts_combat_rl.sim.contract import SimulatorAction
+from sts_combat_rl.sim.native_public_projection import (
+    NATIVE_PUBLIC_PROJECTION_EXTERNAL_BASE_COMMIT,
+    NATIVE_PUBLIC_PROJECTION_PATCH_ID,
+    NATIVE_PUBLIC_PROJECTION_SCHEMA_ID,
+    parse_native_public_projection,
+)
+from sts_combat_rl.sim.public_run_context import build_public_run_context
 from sts_combat_rl.artifact_eligibility import (
     ArtifactQualification,
     EligibilityRequirements,
@@ -312,6 +321,288 @@ def _runner(monkeypatch, bridge):
     return identity, report, calls, runner
 
 
+def _real_projection_field(value: object, source: str = "fixture::source"):
+    return {"availability": "available", "source": source, "value": value}
+
+
+def _real_action(scope: str, bits: int, kind: str, label: str) -> SimulatorAction:
+    return SimulatorAction(
+        action_id=f"{scope}:{bits}",
+        label=label,
+        kind=kind,
+        raw={
+            "scope": scope,
+            "bits": bits,
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+        },
+    )
+
+
+def _real_projection(actions: list[SimulatorAction]):
+    resources = {
+        "current_hp": _real_projection_field(80),
+        "max_hp": _real_projection_field(80),
+        "gold": _real_projection_field(50),
+        "potion_count": _real_projection_field(1),
+        "potion_capacity": _real_projection_field(3),
+        "deck": {"availability": "unavailable", "reason": "not exposed"},
+        "relics": {"availability": "unavailable", "reason": "not exposed"},
+        "potion_identities": {
+            "availability": "unavailable",
+            "reason": "not exposed",
+        },
+        "keys": {"availability": "unavailable", "reason": "not exposed"},
+    }
+    return parse_native_public_projection(
+        {
+            "schema_id": NATIVE_PUBLIC_PROJECTION_SCHEMA_ID,
+            "external_base_commit": NATIVE_PUBLIC_PROJECTION_EXTERNAL_BASE_COMMIT,
+            "patch_identity": NATIVE_PUBLIC_PROJECTION_PATCH_ID,
+            "screen_identity": _real_projection_field("BATTLE"),
+            "visible_act_boss": {
+                "availability": "unavailable",
+                "reason": "not exposed",
+            },
+            "visible_map_graph": {
+                "availability": "unavailable",
+                "reason": "not exposed",
+            },
+            "current_map_node": {
+                "availability": "unavailable",
+                "reason": "not exposed",
+            },
+            "immediately_legal_routes": {
+                "availability": "unavailable",
+                "reason": "not exposed",
+            },
+            "persistent_resources": _real_projection_field(resources),
+            "screen_payload": {
+                "availability": "unsupported",
+                "reason": "not exposed",
+            },
+            "candidate_actions": _real_projection_field(
+                [
+                    {
+                        **{
+                            key: action.raw[key]
+                            for key in ("scope", "bits", "idx1", "idx2", "idx3")
+                        },
+                        "kind": action.kind,
+                        "label": action.label,
+                    }
+                    for action in actions
+                ],
+                "StepSimulator::legalActions",
+            ),
+        }
+    )
+
+
+def _real_context_runner(
+    monkeypatch, actions, observed_actions, *, accepted_actions=None
+):
+    identity = "real-public-context-parity-fixture"
+    raw = {
+        "screen_state": "BATTLE",
+        "battle_active": True,
+        "battle_player_hp": 80,
+        "battle_player": {"current_hp": 80, "max_hp": 80},
+        "cur_hp": 80,
+        "max_hp": 80,
+        "gold": 50,
+        "potion_count": 1,
+        "potion_capacity": 3,
+        "act": 1,
+        "floor_num": 1,
+        "room_type": "MONSTER",
+        "outcome": "UNDECIDED",
+    }
+    observed_projection = _real_projection(observed_actions)
+    canonical_actions = actions if accepted_actions is None else accepted_actions
+    expected_context = build_public_run_context(
+        raw,
+        canonical_actions,
+        projection=_real_projection(canonical_actions),
+        history=[],
+    )
+    calls = []
+    report = {
+        "schema_id": "fixture-t099-report-v1",
+        "particle_start": 0,
+        "particle_count": 2,
+        "search_simulations": 400,
+        "include_potions": False,
+        "sampler_seed_input": t101.derive_t101_sampler_seed(identity, 0),
+        "particles": [],
+    }
+
+    def bridge(_snapshot, **kwargs):
+        calls.append(kwargs)
+        return report
+
+    adapter = SimpleNamespace(
+        legal_actions=lambda _snapshot: actions,
+        public_projection=lambda _snapshot: observed_projection,
+        sample_hidden_future_particles_search=bridge,
+    )
+    monkeypatch.setattr(
+        t103,
+        "restore_t085_canonical_record",
+        lambda *_args: (SimpleNamespace(raw=raw), "fixture_restore"),
+    )
+    monkeypatch.setattr(
+        t103,
+        "validate_t101_bridge_report",
+        lambda value, *, particle_count: {**value, "accepted": True},
+    )
+    runner = T103NativeRecordRunner(
+        adapter_factory=lambda: adapter,
+        selected_records={identity: object()},
+        canonical_records_by_stratum={
+            "A": {identity: SimpleNamespace(public_run_context=expected_context)}
+        },
+        native_identity={
+            "repository": "fixture/native",
+            "ref": "fixture",
+            "commit": "c" * 40,
+        },
+        historical_bindings={"input_sha256": "d" * 64},
+    )
+    return identity, expected_context, calls, runner
+
+
+def test_real_public_context_matching_duplicate_occurrences_keep_order(
+    monkeypatch,
+) -> None:
+    actions = [
+        _real_action("battle", 7, "end_turn", "end turn"),
+        _real_action("battle", 7, "end_turn", "end turn"),
+    ]
+    identity, expected_context, calls, runner = _real_context_runner(
+        monkeypatch, actions, actions
+    )
+
+    row = runner.diagnose(
+        {"selection_identity": identity, "cohort": "A"},
+        source_ordinal=0,
+        selection_digest=hashlib.sha256(identity.encode()).hexdigest(),
+    )
+
+    assert row["diagnostic_class"] == "ADMITTED"
+    assert row["public_projection_parity_status"] == "matched"
+    assert row["ordered_legal_action_parity_status"] == "matched"
+    assert [
+        candidate["identity"]["occurrence"]
+        for candidate in expected_context["candidate_actions"]["items"]
+    ] == [0, 1]
+    assert calls == [
+        {
+            "sampler_seed": t101.derive_t101_sampler_seed(identity, 0),
+            "particle_start": 0,
+            "particle_count": 2,
+            "search_simulations": 400,
+            "include_potions": False,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("actions", "observed_actions"),
+    [
+        (
+            [
+                _real_action("battle", 7, "end_turn", "end turn"),
+                _real_action("battle", 7, "end_turn", "end turn"),
+            ],
+            [_real_action("battle", 7, "end_turn", "end turn")],
+        ),
+        (
+            [
+                _real_action("battle", 7, "end_turn", "end turn"),
+                _real_action("battle", 8, "play_card", "play strike"),
+            ],
+            [
+                _real_action("battle", 8, "play_card", "play strike"),
+                _real_action("battle", 7, "end_turn", "end turn"),
+            ],
+        ),
+    ],
+    ids=["duplicate-occurrence-missing", "native-order-changed"],
+)
+def test_real_public_context_parity_guard_rejects_mismatch_before_bridge(
+    monkeypatch, actions, observed_actions
+) -> None:
+    identity, _expected_context, calls, runner = _real_context_runner(
+        monkeypatch, actions, observed_actions
+    )
+
+    row = runner.diagnose(
+        {"selection_identity": identity, "cohort": "A"},
+        source_ordinal=0,
+        selection_digest=hashlib.sha256(identity.encode()).hexdigest(),
+    )
+
+    assert calls == []
+    assert row["diagnostic_class"] == "PUBLIC_PROJECTION_PARITY_FAILURE"
+    assert row["public_projection_parity_status"] == "failed"
+    assert row["ordered_legal_action_parity_status"] == "not_reached"
+    assert row["bridge_invocation_status"] == "not_reached"
+
+
+def test_real_public_context_missing_fields_mismatch_stops_before_bridge(
+    monkeypatch,
+) -> None:
+    actions = [_real_action("battle", 7, "end_turn", "end turn")]
+    identity, expected_context, calls, runner = _real_context_runner(
+        monkeypatch, actions, actions
+    )
+    expected_context["missing_fields"] = [
+        *expected_context["missing_fields"],
+        "$.canonical_only_missing_field",
+    ]
+
+    row = runner.diagnose(
+        {"selection_identity": identity, "cohort": "A"},
+        source_ordinal=0,
+        selection_digest=hashlib.sha256(identity.encode()).hexdigest(),
+    )
+
+    assert calls == []
+    assert row["diagnostic_class"] == "PUBLIC_PROJECTION_PARITY_FAILURE"
+    assert row["public_projection_parity_status"] == "failed"
+    assert row["ordered_legal_action_parity_status"] == "not_reached"
+    assert row["bridge_invocation_status"] == "not_reached"
+
+
+def test_real_public_context_preserves_ordered_action_boundary_after_projection_guard(
+    monkeypatch,
+) -> None:
+    actions = [
+        _real_action("battle", 7, "end_turn", "end turn"),
+        _real_action("battle", 8, "play_card", "play strike"),
+    ]
+    identity, _expected_context, calls, runner = _real_context_runner(
+        monkeypatch,
+        actions,
+        actions,
+        accepted_actions=list(reversed(actions)),
+    )
+
+    row = runner.diagnose(
+        {"selection_identity": identity, "cohort": "A"},
+        source_ordinal=0,
+        selection_digest=hashlib.sha256(identity.encode()).hexdigest(),
+    )
+
+    assert calls == []
+    assert row["diagnostic_class"] == "ORDERED_LEGAL_ACTION_PARITY_FAILURE"
+    assert row["public_projection_parity_status"] == "matched"
+    assert row["ordered_legal_action_parity_status"] == "failed"
+    assert row["bridge_invocation_status"] == "not_reached"
+
+
 def test_diagnostic_invokes_frozen_success_call_once_and_does_not_retain_report(
     monkeypatch,
 ) -> None:
@@ -403,10 +694,9 @@ def test_untyped_native_exception_stays_opaque_without_retry(monkeypatch) -> Non
 def test_anchor_projection_mismatch_updates_candidate_status(monkeypatch) -> None:
     identity, report, _calls, runner = _runner(monkeypatch, lambda value: value)
     report["anchor_public_information_projection"] = {"anchor": "accepted"}
+    projection = replace(_real_projection([]), canonical_payload='{"anchor":"current"}')
     monkeypatch.setattr(
-        t103,
-        "read_native_public_projection",
-        lambda *_args: SimpleNamespace(canonical_payload='{"anchor":"current"}'),
+        t103, "read_native_public_projection", lambda *_args: projection
     )
     monkeypatch.setattr(
         t103,
