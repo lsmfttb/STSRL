@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import replace
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +11,13 @@ import pytest
 import sts_combat_rl.commands.t103_particle_diagnostic as t103_command
 import sts_combat_rl.sim.t101_particle_convergence as t101
 import sts_combat_rl.sim.t103_particle_diagnostic as t103
+from sts_combat_rl.artifact_eligibility import (
+    ArtifactQualification,
+    EligibilityRequirements,
+    Fact,
+    Predicate,
+    evaluate_eligibility,
+)
 from sts_combat_rl.sim.contract import SimulatorAction
 from sts_combat_rl.sim.native_public_projection import (
     NATIVE_PUBLIC_PROJECTION_EXTERNAL_BASE_COMMIT,
@@ -19,13 +26,6 @@ from sts_combat_rl.sim.native_public_projection import (
     parse_native_public_projection,
 )
 from sts_combat_rl.sim.public_run_context import build_public_run_context
-from sts_combat_rl.artifact_eligibility import (
-    ArtifactQualification,
-    EligibilityRequirements,
-    Fact,
-    Predicate,
-    evaluate_eligibility,
-)
 from sts_combat_rl.sim.t103_particle_diagnostic import (
     T103_CLASSES,
     T103DiagnosticError,

@@ -27,11 +27,6 @@ PUBLIC_RUN_CONTEXT_SCHEMA_VERSION = 1
 PUBLIC_RUN_HISTORY_ENTRY_SCHEMA_ID = "public-run-history-entry-v1"
 PUBLIC_RUN_HISTORY_ENTRY_SCHEMA_VERSION = 1
 
-
-class PublicProjectionCandidateParityError(ValueError):
-    """The native candidate surface differs from adapter legal actions."""
-
-
 PUBLIC_RUN_CONTEXT_GAPS = (
     "visible_act_boss",
     "visible_map_graph",
@@ -386,7 +381,7 @@ def _validate_projection_candidate_parity(
     expected = action_identity_dicts_for_actions(actions)
     observed = projection.candidate_action_identities()
     if expected != observed:
-        raise PublicProjectionCandidateParityError(
+        raise ValueError(
             "public projection candidate actions do not match adapter legal actions"
         )
 

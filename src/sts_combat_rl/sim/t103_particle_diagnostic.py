@@ -21,7 +21,7 @@ from sts_combat_rl.commands.t085_native_execution import (
     restore_t085_canonical_record,
 )
 from sts_combat_rl.sim.public_run_context import (
-    PublicProjectionCandidateParityError,
+    _validate_projection_candidate_parity,
     build_public_run_context,
     read_native_public_projection,
 )
@@ -435,6 +435,16 @@ class T103NativeRecordRunner:
             if not isinstance(history, Sequence) or isinstance(history, (str, bytes)):
                 evidence["observation_failed"] = True
                 raise _T103ObservedBoundary("accepted public history is malformed")
+            if projection is not None:
+                try:
+                    _validate_projection_candidate_parity(projection, actions)
+                except ValueError as parity_exc:
+                    row["public_projection_parity_status"] = "failed"
+                    evidence["public_projection_parity"] = False
+                    exc = parity_exc
+                    raise _T103ObservedBoundary(
+                        "native projection candidate surface differs"
+                    ) from parity_exc
             try:
                 projection_context = build_public_run_context(
                     restored.raw,
@@ -442,13 +452,6 @@ class T103NativeRecordRunner:
                     projection=projection,
                     history=history,
                 )
-            except PublicProjectionCandidateParityError as parity_exc:
-                row["public_projection_parity_status"] = "failed"
-                evidence["public_projection_parity"] = False
-                exc = parity_exc
-                raise _T103ObservedBoundary(
-                    "native projection candidate surface differs"
-                ) from parity_exc
             except Exception as projection_exc:
                 exc = projection_exc
                 evidence["observation_failed"] = True
