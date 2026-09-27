@@ -112,6 +112,17 @@ def _report(anchor, particles, *, flag=True):
     }
 
 
+def _public_action(index):
+    return {
+        "scope": "battle",
+        "kind": "card",
+        "idx1": index,
+        "idx2": 0,
+        "idx3": 0,
+        "label": f"public card {index}",
+    }
+
+
 @pytest.mark.parametrize(
     "p0,anchor,particle,flag,expected",
     [
@@ -137,9 +148,9 @@ def _report(anchor, particles, *, flag=True):
             "STRUCTURED_PARITY_FLAG_INCONSISTENCY",
         ),
         (
-            {"ordered_public_legal_actions": [1, 2]},
-            {"ordered_public_legal_actions": [1, 2]},
-            {"ordered_public_legal_actions": [2, 1]},
+            {"ordered_public_legal_actions": [_public_action(1), _public_action(2)]},
+            {"ordered_public_legal_actions": [_public_action(1), _public_action(2)]},
+            {"ordered_public_legal_actions": [_public_action(2), _public_action(1)]},
             True,
             "ORDERED_PUBLIC_ACTION_DRIFT",
         ),
@@ -157,6 +168,150 @@ def test_all_part_a_classes_with_earliest_boundary(
 ):
     row = diagnostic.localize_projection(p0, _report(anchor, [particle], flag=flag))
     assert row["part_a_class"] == expected
+
+
+@pytest.mark.parametrize(
+    "actions", [[], [_public_action(1), _public_action(1), _public_action(2)]]
+)
+def test_action_flag_only_contradiction_requires_established_equal_payloads(actions):
+    projection = {"player": {"hp": 80}, "ordered_public_legal_actions": actions}
+    report = _report(projection, [projection, projection])
+    report["particles"][0]["ordered_public_legal_actions_equal"] = False
+    observed = diagnostic.localize_projection(projection, report)
+    assert observed["part_a_class"] == "STRUCTURED_PARITY_FLAG_INCONSISTENCY"
+    assert observed["structured_action_parity_failed"] is True
+    assert observed["public_projection_differences"] == []
+    assert observed["ordered_action_differences"] == []
+    assert all(
+        e["ordered_identity_sequence_equal"] is True
+        for e in observed["ordered_action_identity_occurrence_order_evidence"]
+    )
+    missing = diagnostic.localize_projection(None, report)
+    assert missing["part_a_class"] == "PROJECTION_FAILURE_LOCALIZATION_OPAQUE"
+    assert missing["structured_action_parity_failed"] is True
+
+
+@pytest.mark.parametrize(
+    "surface",
+    [
+        "P0_missing",
+        "P0_private",
+        "P0_malformed",
+        "P0_empty",
+        "anchor_missing",
+        "anchor_private",
+        "Pi_missing",
+        "one_Pi_missing",
+        "Pi_private",
+        "Pi_empty",
+    ],
+)
+@pytest.mark.parametrize("actual_action_difference", [False, True])
+def test_unavailable_projection_boundary_never_clears_earlier_failure(
+    surface, actual_action_difference
+):
+    actions = [_public_action(1), _public_action(2)]
+    projection = {"player": {"hp": 80}, "ordered_public_legal_actions": actions}
+    p0 = deepcopy(projection)
+    report = _report(
+        deepcopy(projection), [deepcopy(projection), deepcopy(projection)], flag=False
+    )
+    report["particles"][0]["ordered_public_legal_actions_equal"] = False
+    if actual_action_difference:
+        report["particles"][0]["ordered_public_legal_actions"] = list(reversed(actions))
+    if surface.startswith("P0"):
+        p0 = {
+            "P0_missing": None,
+            "P0_private": {"player": {"private_state": "secret"}},
+            "P0_malformed": {"player": object()},
+            "P0_empty": {},
+        }[surface]
+    elif surface == "anchor_missing":
+        report.pop("anchor_public_information_projection")
+    elif surface == "anchor_private":
+        report["anchor_public_information_projection"] = {
+            "player": {"private_state": "secret"}
+        }
+    elif surface == "Pi_missing":
+        report["particles"] = []
+    elif surface == "one_Pi_missing":
+        report["particles"][1].pop("public_information_projection")
+    else:
+        report["particles"][1]["public_information_projection"] = (
+            {"player": {"private_state": "secret"}} if surface == "Pi_private" else {}
+        )
+    row = diagnostic.localize_projection(p0, report)
+    assert row["part_a_class"] == "PROJECTION_FAILURE_LOCALIZATION_OPAQUE"
+    assert "private_state" not in json.dumps(row)
+    assert "secret" not in json.dumps(row)
+
+
+@pytest.mark.parametrize("boundary", ["P0 -> A", "A -> Pi"])
+@pytest.mark.parametrize("change", ["order", "identity", "duplicate_occurrence"])
+def test_class_four_requires_observed_valid_action_identity_occurrence_or_order_difference(
+    boundary, change
+):
+    before = [_public_action(1), _public_action(1), _public_action(2)]
+    after = {
+        "order": list(reversed(before)),
+        "identity": [_public_action(3), *before[1:]],
+        "duplicate_occurrence": [
+            _public_action(1),
+            _public_action(2),
+            _public_action(2),
+        ],
+    }[change]
+    projection = {"player": {"hp": 80}, "ordered_public_legal_actions": before}
+    report = _report(projection, [projection, projection])
+    if boundary == "P0 -> A":
+        report["anchor_ordered_public_legal_actions"] = after
+        for p in report["particles"]:
+            p["ordered_public_legal_actions"] = after
+    else:
+        report["particles"][0]["ordered_public_legal_actions"] = after
+    row = diagnostic.localize_projection(projection, report)
+    assert row["part_a_class"] == "ORDERED_PUBLIC_ACTION_DRIFT"
+    assert row["structured_action_parity_failed"] is False
+    evidence = row["ordered_action_identity_occurrence_order_evidence"]
+    assert any(e.get("ordered_identity_sequence_equal") is False for e in evidence)
+    if change == "order":
+        assert all(e["identity_occurrence_counts_equal"] for e in evidence)
+    else:
+        assert any(e["identity_occurrence_counts_equal"] is False for e in evidence)
+
+
+@pytest.mark.parametrize(
+    "missing", ["anchor_actions", "particle_actions", "invalid_action_identity"]
+)
+def test_action_flag_with_unavailable_comparison_cannot_establish_drift_or_inconsistency(
+    missing,
+):
+    actions = [_public_action(1)]
+    projection = {"player": {"hp": 80}, "ordered_public_legal_actions": actions}
+    report = _report(projection, [projection, projection])
+    report["particles"][0]["ordered_public_legal_actions_equal"] = False
+    if missing == "anchor_actions":
+        report.pop("anchor_ordered_public_legal_actions")
+    elif missing == "particle_actions":
+        report["particles"][1].pop("ordered_public_legal_actions")
+    else:
+        report["particles"][0]["ordered_public_legal_actions"] = [
+            {"kind": "malformed public identity"}
+        ]
+    row = diagnostic.localize_projection(projection, report)
+    assert row["part_a_class"] == "PROJECTION_FAILURE_LOCALIZATION_OPAQUE"
+    assert row["structured_action_parity_failed"] is True
+
+
+def test_direct_earlier_projection_drift_remains_localized_with_missing_downstream_surfaces():
+    p0 = {"player": {"hp": 80}, "ordered_public_legal_actions": []}
+    anchor = {"player": {"hp": 79}, "ordered_public_legal_actions": []}
+    first = diagnostic.localize_projection(p0, _report(anchor, []))
+    assert first["part_a_class"] == "ANCHOR_CAPTURE_DRIFT"
+    report = _report(p0, [anchor, p0])
+    report["particles"][1].pop("public_information_projection")
+    second = diagnostic.localize_projection(p0, report)
+    assert second["part_a_class"] == "PARTICLE_PUBLIC_STATE_DRIFT"
 
 
 @pytest.mark.parametrize(

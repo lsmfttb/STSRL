@@ -17,6 +17,7 @@ from sts_combat_rl.sim.t096_public_information_sampler import (
     _REQUIRED_PROJECTION_KEYS_V2,
     validate_public_information_projection,
 )
+from sts_combat_rl.sim.t099_particle_search_bridge import _action_identity
 from sts_combat_rl.sim.t101_particle_convergence import derive_t101_sampler_seed
 from sts_combat_rl.sim.t103_particle_diagnostic import (
     T103NativeRecordRunner,
@@ -277,13 +278,13 @@ def localize_projection(p0: object, report: object) -> dict[str, object]:
         isinstance(p, Mapping) and p.get("public_projection_equal") is False
         for p in particles
     )
-    all_equal = (
-        current is not None
-        and anchor is not None
+    compared_payloads_established = (
+        bool(current)
+        and bool(anchor)
         and bool(projections)
-        and all(p is not None for p in projections)
-        and not diffs
+        and all(bool(p) for p in projections)
     )
+    all_equal = compared_payloads_established and not diffs
     action_evidence = []
     anchor_actions = public_projection(
         {
@@ -331,9 +332,14 @@ def localize_projection(p0: object, report: object) -> dict[str, object]:
         public_actions = (
             sanitized.get("ordered_public_legal_actions") if sanitized else None
         )
-        if not isinstance(public_actions, list) or any(
-            not isinstance(a, Mapping) for a in public_actions
-        ):
+        try:
+            if not isinstance(public_actions, list):
+                return None
+            public_actions = [
+                _action_identity(action, "T104 ordered public surface")
+                for action in public_actions
+            ]
+        except ValueError:
             return None
         occurrences: Counter = Counter()
         result = []
@@ -382,17 +388,32 @@ def localize_projection(p0: object, report: object) -> dict[str, object]:
                     "ordered_identity_sequence_equal": left_ids == right_ids,
                 }
             )
-    if any(d["boundary"] == "P0 -> A" for d in payload_diffs):
+    observed_action_drift = any(
+        e.get("ordered_identity_sequence_equal") is False for e in order_evidence
+    )
+    # A failure flag cannot establish an action difference. Later action
+    # localization additionally requires every earlier public payload boundary
+    # to be observed; unavailable comparisons do not establish equality.
+    action_comparisons_established = all(
+        "ordered_identity_sequence_equal" in e for e in order_evidence
+    )
+    action_flag_inconsistent = (
+        action_failed and action_comparisons_established and not observed_action_drift
+    )
+    if current and anchor and any(d["boundary"] == "P0 -> A" for d in payload_diffs):
         cls = PART_A_CLASSES[0]
     elif (
-        current is not None
+        bool(current)
         and anchor == current
-        and any(d["boundary"] == "A -> Pi" for d in payload_diffs)
+        and any(
+            d["boundary"] == "A -> Pi" and bool(projections[d["particle_index"]])
+            for d in payload_diffs
+        )
     ):
         cls = PART_A_CLASSES[1]
-    elif all_equal and flag_failed:
+    elif all_equal and (flag_failed or action_flag_inconsistent):
         cls = PART_A_CLASSES[2]
-    elif not payload_diffs and (diffs or action_evidence or action_failed):
+    elif compared_payloads_established and not payload_diffs and observed_action_drift:
         cls = PART_A_CLASSES[3]
     else:
         cls = PART_A_CLASSES[4]
