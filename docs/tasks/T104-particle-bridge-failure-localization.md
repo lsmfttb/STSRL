@@ -35,8 +35,6 @@ Planner publication base:
 
 `main @ 72b96734c33b52687aa94e36b681d4c6648b054f`
 
-No other open STSRL task PR exists at publication.
-
 The accepted T103 scientific producer is:
 
 `ec58e2ad396c149988ca639fd3b22244d331b9d7`
@@ -45,7 +43,6 @@ The accepted current native identity remains:
 
 `lsmfttb/sts_lightspeed refs/heads/stsrl/main @ 97f59b620efe5ee1571f8da298c99d1e21c1149b`
 
-with the accepted binary/source binding retained by the T103 evidence record.
 A native source change is a material task change and is not authorized by this
 contract.
 
@@ -59,38 +56,43 @@ Accepted predecessors:
 
 ## Artifact Eligibility Contract
 
+Reuse mode: `scientific_quality_claim`.
+
+Artifact eligibility claim boundary: T104 may claim only bounded localization of
+the accepted T103 failure population under the frozen T101/T103 identity and
+configuration. T104 evidence is unavailable for repair efficacy, N>2 particle
+convergence, controller promotion, training quality, or claims outside this
+frozen cohort.
+
 Required inputs:
 
-- the accepted T103 candidate diagnostics, aggregate report, retention manifest,
-  and execution record;
-- the exact accepted T101/T103 413-record population and deterministic ordering;
-- the accepted restore/source inputs required for deterministic replay;
-- the current accepted native source manifest and T098/T099 capability surface;
+- accepted T103 candidate diagnostics, aggregate report, retention manifest, and
+  execution record;
+- exact accepted T101/T103 413-record population and deterministic ordering;
+- accepted restore/source inputs required for deterministic replay;
+- current accepted native source manifest and T098/T099 capability surface;
 - generated T104 per-candidate localization rows, aggregate report, and retention
   manifest.
-
-Reuse mode: `scientific_quality_claim`, limited to localization of the accepted
-T103 failure population.
 
 Required predicates:
 
 - exact artifact kind/schema/path/SHA-256 and producer provenance match accepted
   records;
-- the T103 input census is exactly 413 unique identities with A/B/C 93/192/128;
-- the accepted T103 class counts are exactly 70 projection-parity, 343 opaque,
-  and 0 admitted;
-- the current native identity equals the accepted T103 identity;
+- T103 input census is exactly 413 unique identities with A/B/C 93/192/128;
+- accepted T103 class counts are exactly 70 projection-parity, 343 opaque, and 0
+  admitted;
+- current native identity equals the accepted T103 identity;
 - every T104 probe is bound to one exact T103 selection identity and replicate-0
   seed;
-- no T104 result is used as a repair or convergence result.
+- no T104 result is reused as a repair or convergence result.
 
-If any required artifact, provenance fact, identity, or exact retained hash is
-missing, conflicting, malformed, or unverifiable, fail closed to `INCOMPLETE`.
+If any required artifact, provenance fact, identity, exact retained hash, or
+required qualification fact is missing, conflicting, malformed, unverifiable,
+or unavailable, fail closed to `INCOMPLETE`.
 
 ## Frozen Scientific Boundary
 
-T104 preserves the T103 scientific configuration wherever the T099 bridge is
-invoked:
+Whenever the T099 bridge is invoked, T104 preserves:
 
 - exact T101/T103 source identities and order;
 - replicate index 0 and accepted T101 seed derivation;
@@ -101,160 +103,153 @@ invoked:
 - unchanged current native identity;
 - no retry with altered seed/configuration to obtain a different outcome.
 
-T104 may use fresh restored clones for independent stage probes so one diagnostic
-call cannot consume or mutate state used by another. Probe order itself must not
-change the scientific classification.
+Independent stage probes may use fresh restored clones so one diagnostic call
+cannot consume or mutate state used by another. Probe order must not change the
+scientific classification.
 
 ## Baseline Reproduction Gate
 
 Before interpreting localization results, reproduce the accepted T103 class for
-each candidate that is re-invoked through the full T099 bridge.
+each candidate re-invoked through the full T099 bridge.
 
-If a full-bridge replay changes a candidate from its accepted T103 top-level
-class, stop interpretation for that candidate and record the exact mismatch.
-If any candidate becomes admitted, or if changed classifications are broad enough
-to invalidate the accepted 70/343 census, terminate as:
+If any candidate becomes admitted, or changed classifications materially
+invalidate the accepted 70/343 census, terminate as:
 
 `T103_SUPPORT_RESULT_NOT_REPRODUCED`
 
-Do not silently reinterpret a changed baseline as new localization evidence.
+Do not reinterpret a changed baseline as localization evidence.
 
 ## Part A: Projection-Failure Localization
 
-The 70 accepted `PUBLIC_PROJECTION_PARITY_FAILURE` candidates form a complete
-census for Part A.
+The 70 accepted `PUBLIC_PROJECTION_PARITY_FAILURE` identities form the complete
+Part A census.
 
-For each of the 70, capture only accepted public-information surfaces and retain
-three logically distinct projections when the existing API exposes them:
+For each candidate retain, when the existing API exposes them:
 
-- `P0`: the canonical public projection immediately before bridge invocation;
-- `A`: the bridge anchor public-information projection;
-- `Pi`: each returned particle public-information projection.
+- `P0`: canonical public projection immediately before bridge invocation;
+- `A`: bridge anchor public-information projection;
+- `Pi`: each returned particle public-information projection;
+- existing structured public/action parity flags;
+- ordered public legal-action surfaces required to interpret parity.
 
-Also retain the existing structured public/action parity flags and the ordered
-public legal-action surfaces needed to interpret projection consistency.
+Each candidate receives exactly one earliest directly observable class:
 
-### Required first-drift classes
+1. `ANCHOR_CAPTURE_DRIFT`: `P0` is established and `A != P0`;
+2. `PARTICLE_PUBLIC_STATE_DRIFT`: `A == P0` and at least one `Pi != A`;
+3. `STRUCTURED_PARITY_FLAG_INCONSISTENCY`: compared public payloads are equal at
+   the available boundary but a stable structured parity flag reports failure;
+4. `ORDERED_PUBLIC_ACTION_DRIFT`: projection payload parity is not the earlier
+   failure, but ordered public action identity/occurrence/order differs;
+5. `PROJECTION_FAILURE_LOCALIZATION_OPAQUE`: accepted T103 class reproduces but
+   existing public surfaces cannot responsibly distinguish the earlier classes.
 
-Each of the 70 must receive exactly one earliest directly observable class:
+For every directly observed projection mismatch retain deterministic exact
+JSON-Pointer-style paths, or an equivalent canonical public-field path, including
+whether each path is unequal, missing on one side, or has different stable public
+value types, and whether the difference occurs in `P0 -> A`, `A -> Pi`, or both.
 
-1. `ANCHOR_CAPTURE_DRIFT`
-   - `P0` is established and `A != P0` before any particle-vs-anchor drift is
-     needed to explain failure;
-2. `PARTICLE_PUBLIC_STATE_DRIFT`
-   - `A == P0` is established and at least one `Pi != A`;
-3. `STRUCTURED_PARITY_FLAG_INCONSISTENCY`
-   - compared public payloads are equal at the available boundary but a stable
-     structured parity flag reports failure;
-4. `ORDERED_PUBLIC_ACTION_DRIFT`
-   - projection payload parity is not the earlier failure, but ordered public
-     legal-action identity/occurrence/order differs at a directly observed stage;
-5. `PROJECTION_FAILURE_LOCALIZATION_OPAQUE`
-   - the accepted T103 class reproduces but existing public surfaces cannot
-     responsibly distinguish the earlier classes.
+Do not export hidden-future payloads, hidden RNG internals, or private state.
 
-The implementation may use more detailed stable subreason codes, but every
-subreason must map to exactly one class above.
-
-### Field-level evidence
-
-For every structurally observed projection mismatch, retain deterministic exact
-JSON-Pointer-style differing paths or an equivalent canonical public-field path
-representation. Report:
-
-- path present on both sides but unequal;
-- path missing on one side;
-- stable public value type on each side;
-- whether the difference occurs in `P0 -> A`, `A -> Pi`, or both.
-
-Public values may be retained only when already permitted by the accepted public
-projection contract. Hidden-future payloads, hidden RNG internals, or private
-state must not be exported merely to explain a difference.
-
-Aggregate Part A by:
-
-- first-drift class;
-- A/B/C stratum;
-- exact field-path signature;
-- field family where an already-defined public schema provides one;
-- number of particles affected per candidate;
-- whether ordered action identity/occurrence/order also differs.
-
-The concentration of 63/70 accepted T103 projection failures in cohort C is a
-fact to explain descriptively, not permission to infer a cause from cohort label
-alone.
+Aggregate Part A by first-drift class, A/B/C stratum, field-path signature,
+already-defined public field family, particles affected, and ordered-action
+identity/occurrence/order drift. The C concentration 63/70 is descriptive
+coverage, not a causal label.
 
 ## Part B: Opaque-Bridge Stage Localization
 
-The 343 accepted `OPAQUE_BRIDGE_FAILURE` candidates form a complete census for
-Part B.
+The 343 accepted `OPAQUE_BRIDGE_FAILURE` identities form the complete Part B
+census.
 
-T104 must not convert the retained two RuntimeError signatures or any other
-free-form exception text into causal labels. Exact exception type/signature may
-be used only as an audit/grouping key.
+Free-form exception text and retained RuntimeError signatures are audit/grouping
+evidence only and must never determine a scientific class.
 
-Use only existing accepted deterministic surfaces to establish stage reach. At
-minimum evaluate, where technically available without native modification:
+Use only existing accepted deterministic surfaces, with separate fresh clones
+where needed, to probe:
 
-1. restore/public-context/action parity on a fresh clone;
-2. the accepted standalone hidden-future sampler capability using the same
-   selection identity, replicate-0 seed, particle count/range, and no-potion
-   public-information boundary;
-3. the unchanged full T099 particle/Search bridge on a separate fresh clone;
-4. any already-existing structured native/STSRL stage fields or stable typed
-   error codes accepted before T104.
+1. restore/public-context/action parity;
+2. accepted standalone hidden-future sampler using the same identity,
+   replicate-0 seed, particle count/range, and no-potion public boundary;
+3. unchanged full T099 particle/Search bridge;
+4. any stable structured native/STSRL stage fields or typed codes accepted before
+   T104.
 
-A standalone sampler probe may establish only facts about that standalone
-accepted sampler surface. It must not be treated as proof that a monolithic
-bridge internally passed an identical stage unless the existing API contract
-explicitly establishes that equivalence.
+Standalone sampler success proves only that standalone accepted sampler surface.
+It does not prove the monolithic bridge's internal sampler passed the same stage.
 
-### Required opaque-stage classes
+### Required Part B classes
 
-Each of the 343 must receive the narrowest directly supported class from:
+Each candidate receives the narrowest directly supported mutually exclusive
+class:
 
-1. `PRE_BRIDGE_CONTEXT_FAILURE`
-   - accepted restore/public context/action completeness no longer reproduces;
-2. `STANDALONE_SAMPLER_FAILURE`
-   - the frozen standalone accepted sampler probe itself fails before producing
-     its accepted sanitized output;
-3. `STANDALONE_SAMPLER_PUBLIC_FIDELITY_FAILURE`
-   - standalone sampler returns but its accepted public-fidelity predicates fail;
-4. `BRIDGE_FAILURE_AFTER_STANDALONE_SAMPLER_SUCCESS`
-   - standalone sampler succeeds on the isolated probe, full bridge still fails,
-     but current observability cannot prove a narrower internal bridge stage;
-5. `STRUCTURED_MAPPING_FAILURE`
-   - an already-existing stable structured field/type directly establishes the
-     occurrence-mapping boundary;
-6. `STRUCTURED_SEARCH_SETUP_OR_EXECUTION_FAILURE`
-   - an already-existing stable structured stage proves mapping passed/reached
-     sufficiently and Search setup/execution failed;
-7. `STRUCTURED_ROOT_REPORT_FAILURE`
-   - an already-existing stable structured stage proves Search returned/reached
-     sufficiently and root-report construction/validation failed;
-8. `NATIVE_STAGE_OPAQUE`
-   - the full bridge failure reproduces and no existing accepted structured
-     evidence supports a narrower internal stage.
+1. `PRE_BRIDGE_CONTEXT_FAILURE`;
+2. `STANDALONE_SAMPLER_FAILURE`;
+3. `STANDALONE_SAMPLER_PUBLIC_FIDELITY_FAILURE`;
+4. `BRIDGE_FAILURE_AFTER_STANDALONE_SAMPLER_SUCCESS`;
+5. `STRUCTURED_MAPPING_FAILURE`;
+6. `STRUCTURED_SEARCH_SETUP_OR_EXECUTION_FAILURE`;
+7. `STRUCTURED_ROOT_REPORT_FAILURE`;
+8. `NATIVE_STAGE_OPAQUE`.
 
-These classes are evidence statements, not repair diagnoses. In particular,
-`BRIDGE_FAILURE_AFTER_STANDALONE_SAMPLER_SUCCESS` does not prove that the
-monolithic bridge's own internal sampler succeeded.
+Class 4 means the isolated sampler succeeds and the full bridge still fails, but
+current evidence cannot prove a narrower internal bridge stage. It does not prove
+that the monolithic bridge's own internal sampler succeeded.
+
+These classes are evidence statements, not repair diagnoses.
+
+## Native Observability Decision Predicate
+
+Native-observability need is independent of the mutually exclusive Part B class.
+Every Part B row must additionally retain:
+
+- `native_observability_required`: boolean;
+- `native_observability_missing_stages`: canonical ordered set drawn from the
+  internal bridge stages required to distinguish the next repair boundary;
+- the stable structured facts, if any, that make the boolean false.
+
+Set `native_observability_required=true` exactly when all of the following hold:
+
+1. the accepted full-bridge failure reproduces under the frozen configuration;
+2. existing accepted structured evidence does not establish a concrete repair
+   boundary inside the monolithic bridge; and
+3. one or more repair-distinguishing internal outcomes remain `unknown`, such as
+   monolithic hidden-future sample construction/public-fidelity validation,
+   occurrence mapping, Search setup/execution, or sanitized root-report
+   construction/validation.
+
+Otherwise set it to false.
+
+This decision must not use free-form exception prose. It must not treat an
+isolated standalone sampler result as proof of a monolithic internal stage.
+
+Consequences required by the contract:
+
+- `BRIDGE_FAILURE_AFTER_STANDALONE_SAMPLER_SUCCESS` normally has
+  `native_observability_required=true` while the monolithic sampler/mapping/Search
+  boundary remains unresolved;
+- `NATIVE_STAGE_OPAQUE` has `native_observability_required=true` whenever the
+  missing internal stage evidence is repair-distinguishing;
+- directly structured mapping/Search/root-report failures may have the predicate
+  false because a repair boundary is already established;
+- a standalone sampler failure/fidelity failure may have the predicate false when
+  that accepted surface itself is already the concrete repair boundary.
+
+The classification and the observability predicate answer different questions
+and must never be collapsed into one field.
 
 ## Native Observability Gate
 
-T104 must explicitly decide whether the remaining opaque population can be
-localized enough for a concrete repair task using existing accepted surfaces.
+Let `O` be the exact count of Part B rows with
+`native_observability_required=true`.
 
-If one or more materially important bridge failures remain `NATIVE_STAGE_OPAQUE`
-and no stable existing stage surface can distinguish the relevant internal
-boundary, the normal terminal may be:
+If `O > 0`, and the T103 baseline otherwise reproduces, the successful diagnostic
+terminal is:
 
 `NATIVE_OBSERVABILITY_REQUIRED`
 
-For that terminal, produce an exact minimal observability requirement for a
-future `sts_lightspeed` native issue/spec. The requirement must describe only
-what evidence is missing, for example stable non-secret stage/status codes such
-as:
+For that terminal retain the exact count overall and by Part B class/A-B-C
+stratum, the missing-stage-set signatures, and a minimal future
+`sts_lightspeed` observability requirement. The requirement describes evidence
+only, for example stable non-secret stage/status codes for:
 
 - hidden-future sample construction entered/completed;
 - public-fidelity validation entered/completed;
@@ -263,30 +258,30 @@ as:
 - Search execution returned/failed;
 - sanitized root-report construction entered/failed.
 
-The requirement must not prescribe a repair to mechanics and must not expose
-hidden future values. Any implementation of new native observability must occur
-later through the governed `sts_lightspeed` workflow, with its own issue/spec,
-native Implementer PR, independent exact-head semantic review, native merge,
-and subsequent STSRL source acceptance.
+It must not prescribe mechanics repair or expose hidden future values. Any native
+implementation occurs later through the governed `sts_lightspeed` workflow with
+its own native issue/spec, Implementer PR, independent exact-head semantic review,
+native merge, and later STSRL source acceptance.
 
-T104 itself must not modify `sts_lightspeed`.
+T104 must not modify `sts_lightspeed`.
 
 ## Required Per-Candidate Evidence
 
-Retain one T104 row for every accepted T103 failure identity, containing at least:
+Retain one row for every accepted T103 failure identity with at least:
 
-- `selection_identity`, stratum, deterministic source ordinal/digest;
-- accepted T103 class and retained T103 audit signature;
-- exact current native identity and replicate-0 sampler seed;
-- which T104 probes were attempted on fresh restored clones;
+- selection identity, stratum, deterministic source ordinal/digest;
+- accepted T103 class and retained audit signature;
+- exact current native identity and replicate-0 seed;
+- probes attempted on fresh restored clones;
 - baseline reproduction status for any full-bridge replay;
-- Part A first-drift class and field-path differences when applicable;
-- Part B narrowest structured stage class when applicable;
-- standalone sampler success/fidelity facts when applicable;
+- Part A first-drift class and canonical public field-path differences;
+- Part B narrowest stage class;
+- standalone sampler success/fidelity facts;
 - full bridge invocation/result status;
 - structured stage facts used for classification;
-- bounded exception type/signature for audit only;
+- `native_observability_required` and ordered missing-stage set;
 - explicit `unknown` for every internal stage not directly established;
+- bounded exception type/signature for audit only;
 - wall-clock and resource evidence required by the execution framework.
 
 ## Aggregate Analysis
@@ -294,15 +289,21 @@ Retain one T104 row for every accepted T103 failure identity, containing at leas
 The final report must contain exact integer counts and fractions for:
 
 - Part A 70-candidate first-drift classes overall and by A/B/C;
-- Part A exact field-path signatures and field families;
+- Part A field-path signatures and field families;
 - Part B 343-candidate stage classes overall and by A/B/C;
-- standalone sampler success/failure/fidelity counts for Part B;
-- `NATIVE_STAGE_OPAQUE` coverage;
-- counts by retained T103 exception signature as audit grouping only;
-- number of candidates for which a concrete STSRL-local repair boundary is
-  directly established;
-- number requiring native observability before a repair can be responsibly
+- standalone sampler success/failure/fidelity counts;
+- `NATIVE_STAGE_OPAQUE` coverage as a descriptive class count only;
+- `native_observability_required` true/false counts overall, by Part B class and
+  by A/B/C;
+- canonical missing-stage-set signatures for observability-needed rows;
+- retained T103 exception signatures as audit grouping only;
+- candidates with a concrete repair boundary directly established;
+- candidates requiring native observability before a repair can responsibly be
   specified.
+
+The terminal decision must use the same `native_observability_required` predicate
+used for these aggregate counts. It must not use `NATIVE_STAGE_OPAQUE` count as a
+substitute.
 
 No p-value, confidence interval, causal generalization, or population claim
 outside the frozen T103 cohort is required.
@@ -312,42 +313,46 @@ outside the frozen T103 cohort is required.
 Before final acceptance demonstrate at least:
 
 - exact T103 artifact hashes and producer identity qualify;
-- exact T103 70/343/0 census and A/B/C identities are reproduced from retained
-  evidence before T104 execution;
+- exact T103 70/343/0 census and A/B/C identities reproduce from retained
+  evidence;
 - deterministic replicate-0 seeds match T101/T103;
 - projection diffing is canonical, order-stable, and tested for nested/missing
   public fields;
 - hidden/private fields cannot enter retained projection-diff output;
-- exception prose cannot affect scientific stage classification;
-- synthetic/fixture tests cover each T104 class that implementation can emit;
-- an opaque bridge failure remains opaque when structured evidence is absent;
-- standalone sampler success is not incorrectly promoted to proof of internal
-  monolithic-bridge sampler success;
-- instrumentation does not change native call parameters or make a failing
-  bridge call pass;
-- aggregate counts sum exactly to 70 and 343 respectively;
+- exception prose cannot affect stage class or observability predicate;
+- fixture tests cover each emitted T104 class;
+- tests explicitly cover class4 with unresolved monolithic stages yielding
+  `native_observability_required=true`;
+- tests cover a structured internal failure yielding a concrete repair boundary
+  and predicate false;
+- standalone sampler success is not promoted to proof of monolithic internal
+  sampler success;
+- instrumentation does not change native call parameters or make a failing call
+  pass;
+- aggregate class counts sum exactly to 70 and 343 respectively;
+- observability true/false counts sum exactly to 343;
 - generated evidence is hash-bound under a T104-specific retained artifact root.
 
-Run ordinary task-document guards, focused tests, compile/lint/format checks,
-changed-link checks, and `git diff --check` required by the repository.
+Run task-document guards, focused tests, compile/lint/format checks, changed-link
+checks, and `git diff --check` required by the repository.
 
 ## Terminal Classification
 
-Use exactly one terminal:
+Use exactly one terminal.
 
 ### `BRIDGE_FAILURE_LOCALIZATION_ESTABLISHED`
 
-Use when:
+Use only when:
 
 - all required inputs qualify;
-- all 70 projection failures have an auditable first-drift class and field-level
-  evidence or explicit projection-localization opacity;
-- all 343 opaque failures have the narrowest auditable stage class;
-- existing accepted surfaces localize the materially relevant failures enough to
-  define successor repair boundaries without adding native observability;
+- Part A is complete with auditable first-drift evidence or explicit opacity;
+- all 343 Part B rows have the narrowest auditable class;
+- `O == 0` under the independent observability predicate;
+- existing accepted surfaces therefore define the materially relevant successor
+  repair boundaries without new native observability;
 - no T103 baseline contradiction is observed.
 
-This terminal does not authorize any repair or convergence re-entry.
+This terminal does not authorize repair or convergence re-entry.
 
 ### `NATIVE_OBSERVABILITY_REQUIRED`
 
@@ -356,8 +361,8 @@ Use when:
 - required inputs qualify;
 - Part A is completed responsibly;
 - Part B is replayed/probed as specified;
-- materially important failures remain `NATIVE_STAGE_OPAQUE` because the current
-  accepted API does not expose a stable structured internal stage;
+- `O > 0` under the independent observability predicate, including class4 rows
+  when monolithic internal stages remain unresolved;
 - the exact minimal future native observability requirement is retained.
 
 This is a successful diagnostic terminal, not an implementation failure.
@@ -370,8 +375,8 @@ longer valid.
 
 ### `INCOMPLETE`
 
-Use when required provenance, execution identity, source coverage, or diagnostic
-evidence cannot be completed responsibly.
+Use when required provenance, execution identity, source coverage, qualification,
+or diagnostic evidence cannot be completed responsibly.
 
 ## Successor Decision Boundary
 
@@ -386,9 +391,9 @@ evidence:
   native workflow, not an STSRL implementation task;
 - `NATIVE_OBSERVABILITY_REQUIRED` requires the minimal native observability lane
   before mechanics repair is specified;
-- after accepted repairs materially improve the support boundary, a separate
-  support re-entry task must establish sufficient N=2 admissions before any
-  N>2 particle-convergence experiment is reopened.
+- after accepted repairs materially improve support, a separate support re-entry
+  task must establish sufficient N=2 admissions before any N>2 convergence
+  experiment is reopened.
 
 T063 and T066 remain non-active. T034 is not closed by T104.
 
@@ -402,8 +407,7 @@ Do not perform or authorize in T104:
 - parsing arbitrary exception prose into scientific causes;
 - exporting hidden future state for diagnosis;
 - altered seeds, budgets, potion semantics, or retry-until-pass behavior;
-- N>2 particle-count execution;
-- convergence/stability analysis;
+- N>2 particle-count execution or convergence/stability analysis;
 - model training, checkpoint promotion, controller evaluation, or complete-run
   evaluation;
 - T034 closure or T063/T066 activation.
@@ -413,11 +417,12 @@ Do not perform or authorize in T104:
 Planner amendment and renewed exact-head Maintainer review are required to change
 any of:
 
-- the accepted T103 70/343 population or source identities;
+- accepted T103 70/343 population or source identities;
 - current native identity;
 - T101/T103 seed derivation or N=2/Search-v2@400/no-potion semantics;
 - Part A first-drift classes;
-- Part B opaque-stage classes;
+- Part B stage classes;
+- independent native-observability predicate or its terminal use;
 - permission to use free-form exception text as a classifier;
 - permission to modify native code;
 - hidden/public information boundary;
