@@ -37,7 +37,7 @@ duplicate long experiment reports.
 | T026 | DONE | [Guidance checkpoint inference contract](T026-guidance-checkpoint-inference-contract.md) | T009, T011, T016, T018, T024 | checkpoint scorer contract |
 | T027 | DONE | [Teacher guidance calibration report](T027-teacher-guidance-calibration-report.md) | T026 | checkpoint-vs-teacher calibration |
 | T028 | DONE | [Model-guided Oracle search controller](T028-model-guided-oracle-search-controller.md) | T025, T026, T027 | versioned Oracle-like search controller |
-| T029 | DONE | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source/equal-budget comparison |
+| T029 | DONE | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source comparison |
 | T030 | DONE | [M1 model-guided search sandbox synthesis](T030-m1-model-guided-search-sandbox-synthesis.md) | T027, T029 | milestone synthesis and next task batch |
 | T031 | DONE | [A20 coverage refresh and data gap report](T031-a20-coverage-refresh-data-gap-report.md) | T030 | post-M1 A20 coverage refresh |
 | T032 | DONE | [A20 narrow teacher and checkpoint diagnostic refresh](T032-a20-teacher-checkpoint-refresh.md) | T039 | narrow source-contract diagnostic |
@@ -45,7 +45,7 @@ duplicate long experiment reports.
 | T034 | BLOCKED | [Public-consistent hidden-future sampler boundary](T034-public-consistent-hidden-future-sampler.md) | T033, native sampler support | normal-information hidden-future substrate |
 | T035 | DONE | [Model-guided Oracle search v2](T035-model-guided-oracle-search-v2.md) | T032, T025, T028, T029 | deeper Oracle-like guidance |
 | T036 | DONE | [A20 search-controlled reachability probe](T036-a20-search-controlled-reachability-probe.md) | T006, T017, T020, T025, T029, T031 | search-controlled reachability |
-| T037 | DONE | [A20 search-controlled reachability scale-up](T037-a20-search-controlled-reachability-scaleup.md) | T017, T020, T036 | Boss/Act2 reachability scale-up |
+| T037 | DONE | [A20 search-controlled reachability scale-up](T037-a20-search-controlled-reachability-probe.md) | T017, T020, T036 | search-controlled reachability |
 | T038 | CANCELLED | [A20 source drift audit](T038-a20-source-drift-audit.md) | T037 | unnecessary after T037 recovered reachability |
 | T039 | DONE | [Later-act/Boss source coverage contract](T039-later-act-boss-source-coverage-contract.md) | T037 | explicit source-coverage contract |
 | T040 | DONE | [Expert Non-Combat Driver v1](T040-expert-non-combat-driver-v1.md) | T010, T016, T017, T025, T036, T037, T039, T035 | heuristic source-generation driver |
@@ -113,6 +113,7 @@ duplicate long experiment reports.
 | T103 | DONE | [Natural Battle-Start Particle/Search Support-Domain Failure Taxonomy](T103-particle-search-support-domain-failure-taxonomy.md) | T081, T087, T088, T098, T099, T101, T102 | `SUPPORT_DOMAIN_FAILURE_TAXONOMY_ESTABLISHED`; exact 413-record replay admitted 0; projection parity failure 70, opaque bridge failure 343; no native repair or convergence; [evidence](support/T103/maintainer-execution.md) |
 | T104 | DONE | [Particle-Bridge Failure Localization and Native Observability Gate](T104-particle-bridge-failure-localization.md) | T081, T098, T099, T101, T103 | `NATIVE_OBSERVABILITY_REQUIRED`: full413 baseline reproduced/zero admissions; PartA70 explicit opacity, PartB323 standalone-success/20 failure; all343 need monolithic observability; [execution](support/T104/maintainer-execution.md); no native repair/convergence |
 | T105 | DONE | [Native Particle/Search Stage Observability Source Acceptance](T105-native-stage-observability-source-acceptance.md) | T017, T020, T099, T104 | `NATIVE_PARTICLE_SEARCH_STAGE_OBSERVABILITY_ACCEPTED`; pin `5afae22`; [evidence](support/T105/maintainer-execution.md); no T104 replay/repair/convergence |
+| T106 | READY | [Structured Particle/Search Failure-Stage Diagnostic Re-entry](T106-structured-particle-search-failure-stage-reentry.md) | T081, T098, T099, T101, T104, T105 | exact 343 Part-B replay with T105 structured stage telemetry; no Part-A replay/repair/convergence |
 
 ## Same-ID contract and amendment files
 
