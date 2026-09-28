@@ -53,6 +53,7 @@ from sts_combat_rl.sim.t077_continuation import (
     T077_STAGES,
     T077_TASK_ID,
     T079_ACTIVE_NATIVE_INTEGRATION,
+    T105_STAGE_OBSERVABILITY_NATIVE_INTEGRATION,
     artifact_identity,
     artifact_path,
     build_t077_continuation_plan,
@@ -826,9 +827,10 @@ def run_t077_workflow(
     if manifest.get("integration_commit") not in {
         T077_ACCEPTED_T076_INTEGRATION,
         T079_ACTIVE_NATIVE_INTEGRATION,
+        T105_STAGE_OBSERVABILITY_NATIVE_INTEGRATION,
     }:
         raise T077OperationalError(
-            "runtime manifest is outside the accepted T076/T079 lineage"
+            "runtime manifest is outside the accepted native lineage"
         )
     reuse_identity = _reuse_report(artifact_root, run_head, reuse, manifest)
     run_root = _run_root(artifact_root)

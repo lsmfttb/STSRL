@@ -165,7 +165,7 @@ T085NativeSearchBackend = Literal["battle_search", "battle_search_v2"]
 T085_HISTORICAL_OUTCOME_TARGET_KIND = "terminal_battle_survival_probability"
 
 # T085 artifact identity remains historical d62.  The current repository
-# runtime may use only approved telemetry descendants; no other native
+# runtime may use only approved native descendants; no other native
 # identity is admitted by the compatibility seam.  Source-manifest-bound
 # artifact validators compare retained provenance against that manifest's
 # finite identity, while all other provenance fields remain exact.
@@ -179,10 +179,16 @@ T085_PRE_T088_TELEMETRY_NATIVE_IDENTITY = {
     "ref": "refs/heads/stsrl/main",
     "commit": "96052d24b9c2c16ff25b6f7241edd972613be997",
 }
+T105_STAGE_OBSERVABILITY_NATIVE_IDENTITY = {
+    "repository": "lsmfttb/sts_lightspeed",
+    "ref": "refs/heads/stsrl/main",
+    "commit": "5afae22def0c69657b0139bfa21306aebac831af",
+}
 _T085_ACCEPTED_RUNTIME_IDENTITIES = (
     dict(T085_NATIVE_IDENTITY),
     dict(T085_PRE_T088_TELEMETRY_NATIVE_IDENTITY),
     dict(T085_ACTIVE_NATIVE_IDENTITY),
+    dict(T105_STAGE_OBSERVABILITY_NATIVE_IDENTITY),
 )
 _T085_PROVENANCE_NATIVE_IDENTITY_KEYS = frozenset(
     {"native_identity", "native_source_identity"}
@@ -195,7 +201,7 @@ def _validated_t085_provenance_identity(value: object, label: str) -> dict[str, 
     identity = dict(value)
     if identity not in _T085_ACCEPTED_RUNTIME_IDENTITIES:
         raise T085NativeExecutionError(
-            f"{label} native identity is not an approved d62/960/20a6 identity"
+            f"{label} native identity is not an approved native runtime identity"
         )
     return identity
 

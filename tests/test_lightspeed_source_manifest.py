@@ -36,7 +36,7 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
     )
     assert manifest.integration.branch == "stsrl/main"
     assert manifest.integration.ref == "refs/heads/stsrl/main"
-    assert manifest.integration.commit == ("97f59b620efe5ee1571f8da298c99d1e21c1149b")
+    assert manifest.integration.commit == ("5afae22def0c69657b0139bfa21306aebac831af")
     assert set(REQUIRED_NATIVE_CAPABILITY_IDS).issubset(manifest.capability_ids)
     assert "native_battle_search_root" in manifest.capability_ids
     assert "native_root_prior_allocation" in manifest.capability_ids
@@ -51,6 +51,9 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
         in manifest.capability_ids
     )
     assert "native_stsr006_particle_search_bridge" in manifest.capability_ids
+    assert (
+        "native_stsr007_particle_search_stage_observability" in manifest.capability_ids
+    )
     assert manifest.legacy_patch_stack.status == "retired_provenance"
 
 
@@ -158,6 +161,54 @@ def test_t099_canonical_source_verifier_requires_bridge_checks() -> None:
     assert (
         'PYTHONPATH="$worktree/$build_dir:$repo_root/src${PYTHONPATH:+:' not in verifier
     )
+
+
+def test_t105_native_capability_is_additive_and_requires_stage_audit() -> None:
+    manifest = load_lightspeed_source_manifest()
+    capability = next(
+        item
+        for item in manifest.supported_native_capabilities
+        if item.capability_id == "native_stsr007_particle_search_stage_observability"
+    )
+    assert "native_stsr006_particle_search_bridge" in manifest.capability_ids
+    assert capability.task_provenance == ("T105",)
+    assert "control-flow observability" in capability.description
+    assert "not a game-mechanics root-cause claim" in capability.description
+    for stage in (
+        "hidden_future_sample_construction",
+        "public_fidelity_validation",
+        "root_occurrence_mapping",
+        "search_setup",
+        "search_execution",
+        "sanitized_root_report",
+    ):
+        assert any(stage in api for api in capability.required_python_api)
+    for api in (
+        "StepSimulator.last_particle_search_stage_diagnostics",
+        "StepSimulator.stsr007_particle_search_stage_audit",
+        "StepSimulator.stsr007_particle_search_stage_audit.early_public_failure_stops_later_stages",
+        "StepSimulator.stsr007_particle_search_stage_audit.mapping_failure_attributed",
+        "StepSimulator.stsr007_particle_search_stage_audit.search_setup_failure_attributed",
+        "StepSimulator.stsr007_particle_search_stage_audit.search_execution_failure_attributed",
+        "StepSimulator.stsr007_particle_search_stage_audit.sanitized_report_failure_attributed",
+    ):
+        assert api in capability.required_python_api
+
+
+def test_t105_canonical_source_verifier_requires_lineage_and_native_witnesses() -> None:
+    verifier = (
+        Path(__file__).parents[1] / "scripts" / "verify_lightspeed_source.sh"
+    ).read_text(encoding="utf-8")
+    for required_check in (
+        "97f59b620efe5ee1571f8da298c99d1e21c1149b",
+        "38ab89618495dfc8b8e996fbcca44a93e5c18cfe",
+        "validate_t105_stage_trace",
+        "validate_t105_stage_audit",
+        "module.__file__",
+        "scripts/test_battle_search_v2_state_utilization.py",
+        "scripts/test_stsr007_particle_search_stage_observability.py",
+    ):
+        assert required_check in verifier
 
 
 def test_lightspeed_source_identity_manifest_path_is_cwd_stable(

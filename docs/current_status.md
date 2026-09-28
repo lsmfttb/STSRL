@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-09-27.
+Last updated: 2026-09-29.
 
 This is the compact, merge-stable projection of the accepted project state on
 `main`. It answers what is true now; it does not narrate a PR's approval or
@@ -34,6 +34,13 @@ their distributions, labels, and evaluation reports remain separate.
   `full_state_continuation_strategy_fusion_proxy`. It does not perform
   cross-particle aggregation or action selection and does not claim an exact
   public Q value, exact posterior, or normal-information-optimal Search.
+- T105 accepted the independently reviewed STSRL-007 native source at
+  `refs/heads/stsrl/main @ 5afae22def0c69657b0139bfa21306aebac831af`.
+  The additive, versioned stage trace reports safe control-flow status for six
+  particle/Search bridge boundaries after a call or caught exception. It does
+  not diagnose game-mechanics root cause or change the T099 bridge result and
+  failure semantics. [Execution evidence](tasks/support/T105/maintainer-execution.md)
+  records the lineage and clean-source verification.
 - CommunicationMod formatting remains centralized in
   `src/sts_combat_rl/comm/protocol.py`; CLI modules route to command workflows.
 
@@ -144,10 +151,11 @@ See the [T104 execution record](tasks/support/T104/maintainer-execution.md) for
 exact counts, hashes, producer/resource evidence and minimal observability needs.
 No native change, mechanics repair or convergence execution was performed.
 
-No successor task is authorized by these results. T063 and T066 remain non-active
-scientific directions; see [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md) for their
-exact lifecycle and terminal meanings. No task is promoted merely by appearing
-in a document or Planner Issue.
+T105 source acceptance makes a later bounded T104 diagnostic re-entry eligible
+for a separate Planner task; it does not authorize that replay or any repair.
+T063 and T066 remain non-active scientific directions; see
+[`tasks/ARCHIVE.md`](tasks/ARCHIVE.md) for their exact lifecycle and terminal
+meanings. No task is promoted merely by appearing in a document or Planner Issue.
 
 The retained closed-route conclusions remain available through the task archive
 and contracts, including the earlier Oracle-guided Search, later-act reach,

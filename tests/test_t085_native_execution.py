@@ -1537,6 +1537,18 @@ def test_t085_runtime_identity_boundary_accepts_only_historical_or_current(
         == t085_execution.T085_ACTIVE_NATIVE_IDENTITY
     )
 
+    monkeypatch.setattr(
+        t085_execution,
+        "load_lightspeed_source_manifest",
+        lambda: manifest_for(
+            t085_execution.T105_STAGE_OBSERVABILITY_NATIVE_IDENTITY["commit"]
+        ),
+    )
+    assert (
+        t085_execution._validate_t085_native_source_manifest("battle_search_v2")
+        == t085_execution.T105_STAGE_OBSERVABILITY_NATIVE_IDENTITY
+    )
+
     with pytest.raises(T085NativeExecutionError, match="approved identity"):
         t085_execution._validate_t085_native_source_manifest(
             "battle_search_v2",
