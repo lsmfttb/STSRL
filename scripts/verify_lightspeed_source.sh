@@ -98,6 +98,16 @@ if ! git -C "$source_checkout" merge-base --is-ancestor "$base_commit" "$integra
     echo "integration commit is not based on manifest upstream base commit" >&2
     exit 1
 fi
+if ! git -C "$source_checkout" merge-base --is-ancestor \
+    97f59b620efe5ee1571f8da298c99d1e21c1149b "$integration_commit"; then
+    echo "T105 integration commit does not descend from the previous accepted pin" >&2
+    exit 1
+fi
+if ! git -C "$source_checkout" merge-base --is-ancestor \
+    38ab89618495dfc8b8e996fbcca44a93e5c18cfe "$integration_commit"; then
+    echo "T105 integration commit does not contain the reviewed native head" >&2
+    exit 1
+fi
 
 worktree=$(mktemp -d "${TMPDIR:-/tmp}/stsrl-lightspeed-source.XXXXXX")
 cleanup() {
@@ -151,6 +161,10 @@ from sts_combat_rl.sim.t099_particle_search_bridge import (
     validate_t099_particle_search_audit,
     validate_t099_particle_search_bridge,
 )
+from sts_combat_rl.sim.t105_native_stage_observability import (
+    validate_t105_stage_audit,
+    validate_t105_stage_trace,
+)
 
 
 def fail(message: str) -> None:
@@ -166,6 +180,9 @@ projection_patch_identity = sys.argv[6]
 manifest = load_lightspeed_source_manifest(manifest_path)
 
 module = import_module(module_name)
+build_root = (Path.cwd() / manifest.build.build_directory).resolve()
+if not Path(module.__file__).resolve().is_relative_to(build_root):
+    fail("imported native module is outside the fresh pinned-source build")
 if not hasattr(module, "CharacterClass"):
     fail("module does not expose CharacterClass")
 character_class = getattr(module.CharacterClass, "IRONCLAD", None)
@@ -176,6 +193,9 @@ if simulator_class is None:
     fail(f"{simulator_class_name} is missing")
 
 sim = simulator_class(character_class, 1, 20)
+validate_t105_stage_trace(
+    sim.last_particle_search_stage_diagnostics(), expected_status="not_attempted"
+)
 for method_name in (
     "reset",
     "snapshot",
@@ -198,6 +218,8 @@ for method_name in (
     "sample_hidden_future_particles",
     "sample_hidden_future_particles_search",
     "stsr006_particle_search_audit",
+    "last_particle_search_stage_diagnostics",
+    "stsr007_particle_search_stage_audit",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
 ):
@@ -462,6 +484,13 @@ validate_t099_particle_search_audit(sim.stsr006_particle_search_audit())
 t099_bridge = validate_t099_particle_search_bridge(
     sim.sample_hidden_future_particles_search(17, 0, 2, 1, False)
 )
+validate_t105_stage_trace(
+    sim.last_particle_search_stage_diagnostics(),
+    expected_status="accepted",
+    particle_start=0,
+    particle_count=2,
+)
+validate_t105_stage_audit(sim.stsr007_particle_search_stage_audit())
 if t099_bridge["anchor_public_information_projection"] != t096_projection:
     fail("T099 bridge anchor projection disagrees with the ordinary T096 projection")
 if t099_bridge["anchor_ordered_public_legal_actions"] != (
@@ -665,6 +694,7 @@ observed_capabilities = {
     "constructed_battle_start_transforms",
     "native_t096_public_information_hidden_future_sampler",
     "native_stsr006_particle_search_bridge",
+    "native_stsr007_particle_search_stage_observability",
 }
 missing = sorted(observed_capabilities.difference(expected_capabilities))
 if missing:
@@ -679,5 +709,7 @@ PYTHONPATH="$worktree/$build_dir" python3 scripts/test_t096_visibility_transitio
     --build-dir "$build_dir"
 python3 scripts/test_t096_particle_search_bridge.py --build-dir "$build_dir"
 python3 scripts/test_battle_search_v2_tree_geometry.py --build-dir "$build_dir"
+python3 scripts/test_battle_search_v2_state_utilization.py --build-dir "$build_dir"
+python3 scripts/test_stsr007_particle_search_stage_observability.py --build-dir "$build_dir"
 
 echo "clean sts_lightspeed pinned-source build passed"

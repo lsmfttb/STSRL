@@ -9,7 +9,7 @@
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
     "branch": "stsrl/main",
     "ref": "refs/heads/stsrl/main",
-    "commit": "97f59b620efe5ee1571f8da298c99d1e21c1149b"
+    "commit": "5afae22def0c69657b0139bfa21306aebac831af"
   },
   "python_module": {
     "name": "slaythespire",
@@ -308,6 +308,38 @@
         "StepSimulator.stsr006_particle_search_audit.frozen_eye_search_compatibility",
         "StepSimulator.stsr006_particle_search_audit.known_draw_constraint_preserved",
         "StepSimulator.stsr006_particle_search_audit.unsupported_anchor_fails_closed"
+      ]
+    },
+    {
+      "id": "native_stsr007_particle_search_stage_observability",
+      "description": "Additive STSRL-007 control-flow observability for the STSRL-006 particle/Search bridge, not a game-mechanics root-cause claim or controller/model feature. The safe snapshot records attempt status, first failed stage, stable coarse failure code, accepted-root-report flag, and per-attempt particle rows with deterministic particle_index where available. All six monolithic stages use not_reached/entered/completed/failed status; actual Search setup and execution precede root occurrence mapping because Search materializes the root edge surface. The test-only audit covers success, early public/fidelity failure, occurrence mapping, Search setup, Search execution, and sanitized-report failure without exception-text classification or hidden Battle/RNG/Search-tree payload.",
+      "task_provenance": [
+        "T105"
+      ],
+      "required_python_api": [
+        "StepSimulator.last_particle_search_stage_diagnostics",
+        "StepSimulator.last_particle_search_stage_diagnostics.schema_id.native-particle-search-stage-observability-v1",
+        "StepSimulator.last_particle_search_stage_diagnostics.attempt_status",
+        "StepSimulator.last_particle_search_stage_diagnostics.first_failed_stage",
+        "StepSimulator.last_particle_search_stage_diagnostics.failure_code",
+        "StepSimulator.last_particle_search_stage_diagnostics.accepted_root_report_returned",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.particle_index",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.stages.hidden_future_sample_construction",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.stages.public_fidelity_validation",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.stages.root_occurrence_mapping",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.stages.search_setup",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.stages.search_execution",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.stages.sanitized_root_report",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.stages.not_reached|entered|completed|failed",
+        "StepSimulator.stsr007_particle_search_stage_audit",
+        "StepSimulator.stsr007_particle_search_stage_audit.schema_id.native-stsr007-particle-search-stage-audit-v1",
+        "StepSimulator.stsr007_particle_search_stage_audit.success_all_stages_completed",
+        "StepSimulator.stsr007_particle_search_stage_audit.success_output_sanitized",
+        "StepSimulator.stsr007_particle_search_stage_audit.early_public_failure_stops_later_stages",
+        "StepSimulator.stsr007_particle_search_stage_audit.mapping_failure_attributed",
+        "StepSimulator.stsr007_particle_search_stage_audit.search_setup_failure_attributed",
+        "StepSimulator.stsr007_particle_search_stage_audit.search_execution_failure_attributed",
+        "StepSimulator.stsr007_particle_search_stage_audit.sanitized_report_failure_attributed"
       ]
     }
   ],
