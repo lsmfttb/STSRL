@@ -131,7 +131,20 @@ three-candidate mapping diagnosis is not generalized. See the
 [T103 execution record](tasks/support/T103/maintainer-execution.md) for exact
 producer, retained hashes, resource cost and limitations.
 
-No successor task is authorized by this result. T063 and T066 remain non-active
+T104 completed the same frozen census as `NATIVE_OBSERVABILITY_REQUIRED`, with
+zero admissions and no changed T103 baseline class. All 70 projection failures
+remain explicitly opaque: comparable pre-call/anchor/particle public payloads
+and ordered actions agree, while the separately retained T014-to-T096 baseline
+representation differences reproduce. Among 343 opaque bridge failures, 323
+standalone sampler probes succeed and 20 fail. Neither outcome identifies a
+monolithic bridge stage; all 343 require non-secret native stage observability
+before a concrete monolithic repair boundary can be established. The terminal
+uses that independent predicate, not the zero `NATIVE_STAGE_OPAQUE` class count.
+See the [T104 execution record](tasks/support/T104/maintainer-execution.md) for
+exact counts, hashes, producer/resource evidence and minimal observability needs.
+No native change, mechanics repair or convergence execution was performed.
+
+No successor task is authorized by these results. T063 and T066 remain non-active
 scientific directions; see [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md) for their
 exact lifecycle and terminal meanings. No task is promoted merely by appearing
 in a document or Planner Issue.

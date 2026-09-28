@@ -353,6 +353,7 @@ class T103NativeRecordRunner:
         canonical_records_by_stratum: Mapping[str, Mapping[str, object]],
         native_identity: Mapping[str, object],
         historical_bindings: Mapping[str, object],
+        observation_hook: object | None = None,
     ) -> None:
         if not callable(adapter_factory) or not selected_records:
             raise T103DiagnosticError("T103 native runner inputs are unavailable")
@@ -363,6 +364,7 @@ class T103NativeRecordRunner:
         self._canonical_records_by_stratum = canonical_records_by_stratum
         self._native_identity = dict(native_identity)
         self._historical_bindings = dict(historical_bindings)
+        self._observation_hook = observation_hook
 
     def diagnose(
         self,
@@ -491,6 +493,8 @@ class T103NativeRecordRunner:
                 evidence["bridge_precondition_or_sampler_failed"] = True
                 raise _T103ObservedBoundary("T099 bridge API is unavailable")
             row["bridge_invocation_status"] = "invoked"
+            if callable(self._observation_hook):
+                self._observation_hook("pre_bridge", adapter, restored, projection)
             raw_report = bridge(
                 restored,
                 sampler_seed=seed,
@@ -499,6 +503,8 @@ class T103NativeRecordRunner:
                 search_simulations=T101_SEARCH_SIMULATIONS,
                 include_potions=False,
             )
+            if callable(self._observation_hook):
+                self._observation_hook("bridge_report", adapter, restored, raw_report)
             report_evidence, report_config = _bridge_observations(raw_report)
             evidence.update(report_evidence)
             anchor_projection = (
