@@ -112,6 +112,7 @@ duplicate long experiment reports.
 | T102 | DONE | [Metadata-Current Planner Routing and Maintainer Polling Protocol](T102-agent-planner-notification-protocol.md) | T100, T101, current governance | `AGENT_PLANNER_REVIEW_ROUTING_ESTABLISHED`; metadata-current selection, durable PR response, active-turn polling, idempotent resume; no restart-safe recovery claim |
 | T103 | DONE | [Natural Battle-Start Particle/Search Support-Domain Failure Taxonomy](T103-particle-search-support-domain-failure-taxonomy.md) | T081, T087, T088, T098, T099, T101, T102 | `SUPPORT_DOMAIN_FAILURE_TAXONOMY_ESTABLISHED`; exact 413-record replay admitted 0; projection parity failure 70, opaque bridge failure 343; no native repair or convergence; [evidence](support/T103/maintainer-execution.md) |
 | T104 | DONE | [Particle-Bridge Failure Localization and Native Observability Gate](T104-particle-bridge-failure-localization.md) | T081, T098, T099, T101, T103 | `NATIVE_OBSERVABILITY_REQUIRED`: full413 baseline reproduced/zero admissions; PartA70 explicit opacity, PartB323 standalone-success/20 failure; all343 need monolithic observability; [execution](support/T104/maintainer-execution.md); no native repair/convergence |
+| T105 | READY | [Native Particle/Search Stage Observability Source Acceptance](T105-native-stage-observability-source-acceptance.md) | T017, T020, T099, T104 | accept reviewed STSRL-007 native stage telemetry; target pin `5afae22`; no T104 replay/repair/convergence |
 
 ## Same-ID contract and amendment files
 
