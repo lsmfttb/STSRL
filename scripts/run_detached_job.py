@@ -533,7 +533,9 @@ def _read_process_group_rss_mib(
             if member_process_group_id != process_group_id:
                 continue
             member_rss_kib = _read_member_rss_kib(
-                stat_path, target_exited=target_exited
+                stat_path,
+                expected_process_group_id=process_group_id,
+                target_exited=target_exited,
             )
             if member_rss_kib is None:
                 if target_exited is not None and target_exited():
@@ -580,9 +582,10 @@ def _read_process_group_rss_mib(
 def _read_member_rss_kib(
     stat_path: Path,
     *,
+    expected_process_group_id: int,
     target_exited: Callable[[], bool] | None = None,
 ) -> int | None:
-    """Read one member's RSS, tolerating only a confirmed exit race."""
+    """Read RSS or skip only a confirmed exit/group-membership transition."""
 
     status_path = stat_path.with_name("status")
     missing_error: RuntimeGuardObservationError | None = None
@@ -597,6 +600,12 @@ def _read_member_rss_kib(
     if _proc_entry_is_missing(stat_path) or _proc_entry_is_missing(status_path):
         return None
     if target_exited is not None and target_exited():
+        return None
+    # A member can leave the target group between the initial stat scan and
+    # the status read. A missing VmRSS then says nothing about this group's RSS.
+    # Recheck membership; a still-live member in the group remains fail-closed.
+    current_group_id = _read_process_group_member_id(stat_path)
+    if current_group_id is None or current_group_id != expected_process_group_id:
         return None
     try:
         process_state = _proc_stat_process_state(stat_path)

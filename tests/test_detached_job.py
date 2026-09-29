@@ -334,6 +334,104 @@ def test_rss_scan_ignores_non_target_stat_enoent_without_tripping(
 
 
 @pytest.mark.skipif(
+    sys.platform == "win32", reason="runtime resource guard uses POSIX procfs"
+)
+@pytest.mark.parametrize("current_member_group", [7, 8])
+def test_rss_scan_rechecks_membership_after_missing_vmrss(
+    monkeypatch: pytest.MonkeyPatch, current_member_group: int
+) -> None:
+    """A departed member is excluded; a live unaccountable member still trips."""
+
+    class FakeProcPath:
+        def __init__(self, parts: tuple[str, ...]) -> None:
+            self.parts = parts
+
+        @property
+        def name(self) -> str:
+            return self.parts[-1]
+
+        @property
+        def parent(self) -> FakeProcPath:
+            return FakeProcPath(self.parts[:-1])
+
+        def __truediv__(self, part: str) -> FakeProcPath:
+            return FakeProcPath((*self.parts, part))
+
+        def is_dir(self) -> bool:
+            return self.parts == ("proc",)
+
+        def glob(self, _pattern: str) -> list[FakeProcPath]:
+            return [
+                FakeProcPath(("proc", "123", "stat")),
+                FakeProcPath(("proc", "2909", "stat")),
+            ]
+
+        def stat(self) -> object:
+            return object()
+
+        def with_name(self, name: str) -> FakeProcPath:
+            return FakeProcPath((*self.parts[:-1], name))
+
+    member_reads = 0
+    missing_rss_reads = 0
+
+    def fake_group_id(path: FakeProcPath) -> int:
+        nonlocal member_reads
+        if path.parent.name == "123":
+            return 7
+        member_reads += 1
+        return 7 if member_reads == 1 else current_member_group
+
+    def fake_rss(path: FakeProcPath) -> int:
+        nonlocal missing_rss_reads
+        if path.parent.name == "123":
+            return 1024
+        missing_rss_reads += 1
+        raise _DETACHED_JOB.MissingProcessRssError("VmRSS is missing")
+
+    monkeypatch.setattr(_DETACHED_JOB, "Path", lambda _value: FakeProcPath(("proc",)))
+    monkeypatch.setattr(_DETACHED_JOB, "_proc_stat_process_group_id", fake_group_id)
+    monkeypatch.setattr(_DETACHED_JOB, "_proc_status_rss_kib", fake_rss)
+    monkeypatch.setattr(_DETACHED_JOB.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(_DETACHED_JOB, "_proc_stat_process_state", lambda _path: "R")
+
+    if current_member_group == 7:
+        with pytest.raises(_DETACHED_JOB.MissingProcessRssError, match="VmRSS"):
+            _DETACHED_JOB._read_process_group_rss_mib(123)
+    else:
+        assert _DETACHED_JOB._read_process_group_rss_mib(123) == 1
+    assert member_reads == 2
+    assert missing_rss_reads == _DETACHED_JOB._RUNTIME_RSS_RETRIES
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="runtime resource guard uses POSIX file locking"
+)
+def test_runtime_memavailable_floor_still_trips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _DETACHED_JOB.ResourceAdmissionConfig(
+        root=tmp_path / "resource-admission",
+        memory_budget_mib=100,
+        memory_request_mib=100,
+        batch_id="batch",
+        job_id="low-memavailable",
+        runtime_rss_limit_mib=64,
+        runtime_memavailable_floor_mib=50,
+    )
+    guard = _DETACHED_JOB._RuntimeGuard(config)
+    monkeypatch.setattr(
+        _DETACHED_JOB, "_read_process_group_rss_mib", lambda *_args, **_kwargs: 10
+    )
+    monkeypatch.setattr(_DETACHED_JOB, "_read_memavailable_mib", lambda: 49)
+    assert guard.observe(123) is True
+    assert guard.state == "TRIGGERED"
+    assert "MemAvailable" in guard.trigger_reason
+    assert guard.observed_rss_mib == 10
+    assert guard.lowest_memavailable_mib == 49
+
+
+@pytest.mark.skipif(
     sys.platform == "win32", reason="runtime resource guard uses POSIX process groups"
 )
 def test_runtime_guard_ignores_zombie_group_member_during_short_job(
