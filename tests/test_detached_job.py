@@ -336,11 +336,26 @@ def test_rss_scan_ignores_non_target_stat_enoent_without_tripping(
 @pytest.mark.skipif(
     sys.platform == "win32", reason="runtime resource guard uses POSIX procfs"
 )
-@pytest.mark.parametrize("current_member_group", [7, 8])
-def test_rss_scan_rechecks_membership_after_missing_vmrss(
-    monkeypatch: pytest.MonkeyPatch, current_member_group: int
+@pytest.mark.parametrize(
+    "current_member_group,status_missing,stat_rss_pages,expected_mib",
+    [
+        (7, False, "256", 2),
+        (8, False, "256", 1),
+        (7, True, "256", 2),
+        (7, False, "invalid", None),
+        (7, True, "invalid", None),
+        (7, False, None, None),
+        (7, True, None, None),
+    ],
+)
+def test_rss_scan_validates_stat_fallback_after_missing_status_rss(
+    monkeypatch: pytest.MonkeyPatch,
+    current_member_group: int,
+    status_missing: bool,
+    stat_rss_pages: str | None,
+    expected_mib: int | None,
 ) -> None:
-    """A departed member is excluded; a live unaccountable member still trips."""
+    """Count a live member from stat, but fail closed if both RSS sources fail."""
 
     class FakeProcPath:
         def __init__(self, parts: tuple[str, ...]) -> None:
@@ -367,10 +382,28 @@ def test_rss_scan_rechecks_membership_after_missing_vmrss(
             ]
 
         def stat(self) -> object:
+            if status_missing and self.parts == ("proc", "2909", "status"):
+                raise FileNotFoundError(2, "No such file or directory")
             return object()
 
         def with_name(self, name: str) -> FakeProcPath:
             return FakeProcPath((*self.parts[:-1], name))
+
+        def read_text(self, **_kwargs: object) -> str:
+            assert self.parts == ("proc", "2909", "stat")
+            if stat_rss_pages is None:
+                raise PermissionError("fallback stat is unreadable")
+            # /proc/<pid>/stat fields 3..24: state, ppid, pgrp, 18
+            # intervening fields, then RSS page count. Embedded ')' tests
+            # the comm delimiter parsing as well.
+            fields = [
+                "R",
+                "1",
+                str(current_member_group),
+                *(["0"] * 18),
+                stat_rss_pages,
+            ]
+            return "2909 (worker ) name) " + " ".join(fields)
 
     member_reads = 0
     missing_rss_reads = 0
@@ -380,27 +413,31 @@ def test_rss_scan_rechecks_membership_after_missing_vmrss(
         if path.parent.name == "123":
             return 7
         member_reads += 1
-        return 7 if member_reads == 1 else current_member_group
+        return 7
 
     def fake_rss(path: FakeProcPath) -> int:
         nonlocal missing_rss_reads
         if path.parent.name == "123":
             return 1024
         missing_rss_reads += 1
+        if status_missing:
+            raise _DETACHED_JOB.MissingProcessEntryError("status disappeared")
         raise _DETACHED_JOB.MissingProcessRssError("VmRSS is missing")
 
     monkeypatch.setattr(_DETACHED_JOB, "Path", lambda _value: FakeProcPath(("proc",)))
     monkeypatch.setattr(_DETACHED_JOB, "_proc_stat_process_group_id", fake_group_id)
     monkeypatch.setattr(_DETACHED_JOB, "_proc_status_rss_kib", fake_rss)
     monkeypatch.setattr(_DETACHED_JOB.time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(_DETACHED_JOB, "_proc_stat_process_state", lambda _path: "R")
+    monkeypatch.setattr(_DETACHED_JOB.os, "sysconf", lambda _name: 4096)
 
-    if current_member_group == 7:
-        with pytest.raises(_DETACHED_JOB.MissingProcessRssError, match="VmRSS"):
+    if expected_mib is None:
+        with pytest.raises(
+            _DETACHED_JOB.RuntimeGuardObservationError, match="fallback"
+        ):
             _DETACHED_JOB._read_process_group_rss_mib(123)
     else:
-        assert _DETACHED_JOB._read_process_group_rss_mib(123) == 1
-    assert member_reads == 2
+        assert _DETACHED_JOB._read_process_group_rss_mib(123) == expected_mib
+    assert member_reads == 1
     assert missing_rss_reads == _DETACHED_JOB._RUNTIME_RSS_RETRIES
 
 
