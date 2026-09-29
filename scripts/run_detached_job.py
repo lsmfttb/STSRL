@@ -447,6 +447,60 @@ def _proc_stat_process_state(stat_path: Path) -> str:
     return fields[0]
 
 
+def _proc_stat_rss_kib(
+    stat_path: Path, *, expected_process_group_id: int
+) -> int | None:
+    """Read Linux stat field 24 after validating PID, state, and group."""
+
+    try:
+        contents = stat_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RuntimeGuardObservationError(
+            f"cannot read fallback process RSS from {stat_path}: {exc}"
+        ) from exc
+    opening_paren = contents.find("(")
+    closing_paren = contents.rfind(")")
+    if opening_paren < 0 or closing_paren <= opening_paren:
+        raise RuntimeGuardObservationError(
+            f"malformed fallback process stat {stat_path}"
+        )
+    fields = contents[closing_paren + 2 :].split()
+    if len(fields) < 22:
+        raise RuntimeGuardObservationError(f"missing fallback RSS field in {stat_path}")
+    try:
+        pid = int(contents[:opening_paren].strip())
+        group_id = int(fields[2])  # field 5: pgrp
+        rss_pages = int(fields[21])  # field 24: RSS in pages
+    except ValueError as exc:
+        raise RuntimeGuardObservationError(
+            f"invalid fallback process stat fields in {stat_path}"
+        ) from exc
+    state = fields[0]  # field 3: process state
+    if (
+        pid <= 0
+        or str(pid) != stat_path.parent.name
+        or len(state) != 1
+        or not state.isascii()
+        or not state.isalpha()
+        or group_id <= 0
+        or rss_pages < 0
+    ):
+        raise RuntimeGuardObservationError(f"invalid fallback process stat {stat_path}")
+    if state in _NON_RESIDENT_PROCESS_STATES or group_id != expected_process_group_id:
+        return None
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError) as exc:
+        raise RuntimeGuardObservationError(
+            "cannot determine procfs RSS page size"
+        ) from exc
+    if isinstance(page_size, bool) or not isinstance(page_size, int) or page_size <= 0:
+        raise RuntimeGuardObservationError("invalid procfs RSS page size")
+    return math.ceil(rss_pages * page_size / 1024)
+
+
 def _proc_entry_is_missing(path: Path) -> bool:
     """Return true only when a proc entry is definitively gone."""
 
@@ -533,7 +587,9 @@ def _read_process_group_rss_mib(
             if member_process_group_id != process_group_id:
                 continue
             member_rss_kib = _read_member_rss_kib(
-                stat_path, target_exited=target_exited
+                stat_path,
+                expected_process_group_id=process_group_id,
+                target_exited=target_exited,
             )
             if member_rss_kib is None:
                 if target_exited is not None and target_exited():
@@ -580,37 +636,33 @@ def _read_process_group_rss_mib(
 def _read_member_rss_kib(
     stat_path: Path,
     *,
+    expected_process_group_id: int,
     target_exited: Callable[[], bool] | None = None,
 ) -> int | None:
-    """Read one member's RSS, tolerating only a confirmed exit race."""
+    """Read member RSS from status or a validated Linux stat snapshot."""
 
     status_path = stat_path.with_name("status")
-    missing_error: RuntimeGuardObservationError | None = None
     for attempt in range(_RUNTIME_RSS_RETRIES):
         try:
             return _proc_status_rss_kib(status_path)
-        except (MissingProcessRssError, MissingProcessEntryError) as exc:
-            missing_error = exc
+        except (MissingProcessRssError, MissingProcessEntryError):
             if attempt + 1 < _RUNTIME_RSS_RETRIES:
                 time.sleep(_RUNTIME_RSS_RETRY_SECONDS)
 
-    if _proc_entry_is_missing(stat_path) or _proc_entry_is_missing(status_path):
+    if _proc_entry_is_missing(stat_path):
         return None
     if target_exited is not None and target_exited():
         return None
-    try:
-        process_state = _proc_stat_process_state(stat_path)
-    except RuntimeGuardObservationError:
-        if _proc_entry_is_missing(stat_path):
-            return None
-        raise
-    if process_state in _NON_RESIDENT_PROCESS_STATES:
+    # One stat snapshot binds a fallback RSS measurement to the same PID and
+    # process group. A departed or nonresident member no longer contributes.
+    fallback_rss_kib = _proc_stat_rss_kib(
+        stat_path, expected_process_group_id=expected_process_group_id
+    )
+    if fallback_rss_kib is None:
         return None
     if target_exited is not None and target_exited():
         return None
-    if missing_error is not None:
-        raise missing_error
-    raise RuntimeGuardObservationError(f"unable to read process RSS from {status_path}")
+    return fallback_rss_kib
 
 
 def _read_memavailable_mib() -> int:

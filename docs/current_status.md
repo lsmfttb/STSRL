@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-09-29.
+Last updated: 2026-09-30.
 
 This is the compact, merge-stable projection of the accepted project state on
 `main`. It answers what is true now; it does not narrate a PR's approval or
@@ -156,6 +156,16 @@ for a separate Planner task; it does not authorize that replay or any repair.
 T063 and T066 remain non-active scientific directions; see
 [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md) for their exact lifecycle and terminal
 meanings. No task is promoted merely by appearing in a document or Planner Issue.
+
+T106 completed the exact 343-row T104 Part-B re-entry under the frozen
+replicate-0, N=2, unguided Search-v2@400, no-potions configuration and the
+T105-accepted native stage-observability pin. All 343 prior bridge failures
+reproduced with valid structured traces: 323 first failed at root-occurrence
+mapping and 20 at public-fidelity validation. These are bounded first failed
+control-flow stages, not mechanics root causes or repair efficacy. T106 did not
+replay Part A, change native source, run N>2 convergence, train or promote a
+controller. See the [T106 execution record](tasks/support/T106/maintainer-execution.md)
+and [task archive](tasks/ARCHIVE.md) for exact provenance and retained evidence.
 
 The retained closed-route conclusions remain available through the task archive
 and contracts, including the earlier Oracle-guided Search, later-act reach,

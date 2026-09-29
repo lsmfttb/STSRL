@@ -355,6 +355,23 @@ class LightSpeedAdapter:
             )
         )
 
+    def last_particle_search_stage_diagnostics(self) -> dict[str, Any]:
+        """Read the safe native STSRL-007 trace for the immediately prior call."""
+
+        if not hasattr(self._sim, "last_particle_search_stage_diagnostics"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator lacks STSRL-007 stage diagnostics"
+            )
+        from sts_combat_rl.sim.t105_native_stage_observability import (
+            validate_t105_stage_trace,
+        )
+
+        return dict(
+            validate_t105_stage_trace(
+                dict(self._sim.last_particle_search_stage_diagnostics())
+            )
+        )
+
     def stsr006_particle_search_audit(self) -> dict[str, Any]:
         """Return and validate the native-owned STSRL-006 capability audit."""
 

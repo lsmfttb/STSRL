@@ -334,6 +334,141 @@ def test_rss_scan_ignores_non_target_stat_enoent_without_tripping(
 
 
 @pytest.mark.skipif(
+    sys.platform == "win32", reason="runtime resource guard uses POSIX procfs"
+)
+@pytest.mark.parametrize(
+    "current_member_group,status_missing,stat_rss_pages,expected_mib",
+    [
+        (7, False, "256", 2),
+        (8, False, "256", 1),
+        (7, True, "256", 2),
+        (7, False, "invalid", None),
+        (7, True, "invalid", None),
+        (7, False, None, None),
+        (7, True, None, None),
+    ],
+)
+def test_rss_scan_validates_stat_fallback_after_missing_status_rss(
+    monkeypatch: pytest.MonkeyPatch,
+    current_member_group: int,
+    status_missing: bool,
+    stat_rss_pages: str | None,
+    expected_mib: int | None,
+) -> None:
+    """Count a live member from stat, but fail closed if both RSS sources fail."""
+
+    class FakeProcPath:
+        def __init__(self, parts: tuple[str, ...]) -> None:
+            self.parts = parts
+
+        @property
+        def name(self) -> str:
+            return self.parts[-1]
+
+        @property
+        def parent(self) -> FakeProcPath:
+            return FakeProcPath(self.parts[:-1])
+
+        def __truediv__(self, part: str) -> FakeProcPath:
+            return FakeProcPath((*self.parts, part))
+
+        def is_dir(self) -> bool:
+            return self.parts == ("proc",)
+
+        def glob(self, _pattern: str) -> list[FakeProcPath]:
+            return [
+                FakeProcPath(("proc", "123", "stat")),
+                FakeProcPath(("proc", "2909", "stat")),
+            ]
+
+        def stat(self) -> object:
+            if status_missing and self.parts == ("proc", "2909", "status"):
+                raise FileNotFoundError(2, "No such file or directory")
+            return object()
+
+        def with_name(self, name: str) -> FakeProcPath:
+            return FakeProcPath((*self.parts[:-1], name))
+
+        def read_text(self, **_kwargs: object) -> str:
+            assert self.parts == ("proc", "2909", "stat")
+            if stat_rss_pages is None:
+                raise PermissionError("fallback stat is unreadable")
+            # /proc/<pid>/stat fields 3..24: state, ppid, pgrp, 18
+            # intervening fields, then RSS page count. Embedded ')' tests
+            # the comm delimiter parsing as well.
+            fields = [
+                "R",
+                "1",
+                str(current_member_group),
+                *(["0"] * 18),
+                stat_rss_pages,
+            ]
+            return "2909 (worker ) name) " + " ".join(fields)
+
+    member_reads = 0
+    missing_rss_reads = 0
+
+    def fake_group_id(path: FakeProcPath) -> int:
+        nonlocal member_reads
+        if path.parent.name == "123":
+            return 7
+        member_reads += 1
+        return 7
+
+    def fake_rss(path: FakeProcPath) -> int:
+        nonlocal missing_rss_reads
+        if path.parent.name == "123":
+            return 1024
+        missing_rss_reads += 1
+        if status_missing:
+            raise _DETACHED_JOB.MissingProcessEntryError("status disappeared")
+        raise _DETACHED_JOB.MissingProcessRssError("VmRSS is missing")
+
+    monkeypatch.setattr(_DETACHED_JOB, "Path", lambda _value: FakeProcPath(("proc",)))
+    monkeypatch.setattr(_DETACHED_JOB, "_proc_stat_process_group_id", fake_group_id)
+    monkeypatch.setattr(_DETACHED_JOB, "_proc_status_rss_kib", fake_rss)
+    monkeypatch.setattr(_DETACHED_JOB.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(_DETACHED_JOB.os, "sysconf", lambda _name: 4096)
+
+    if expected_mib is None:
+        with pytest.raises(
+            _DETACHED_JOB.RuntimeGuardObservationError, match="fallback"
+        ):
+            _DETACHED_JOB._read_process_group_rss_mib(123)
+    else:
+        assert _DETACHED_JOB._read_process_group_rss_mib(123) == expected_mib
+    assert member_reads == 1
+    assert missing_rss_reads == _DETACHED_JOB._RUNTIME_RSS_RETRIES
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="runtime resource guard uses POSIX file locking"
+)
+def test_runtime_memavailable_floor_still_trips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _DETACHED_JOB.ResourceAdmissionConfig(
+        root=tmp_path / "resource-admission",
+        memory_budget_mib=100,
+        memory_request_mib=100,
+        batch_id="batch",
+        job_id="low-memavailable",
+        runtime_rss_limit_mib=64,
+        runtime_memavailable_floor_mib=50,
+    )
+    guard = _DETACHED_JOB._RuntimeGuard(config)
+    monkeypatch.setattr(
+        _DETACHED_JOB, "_read_process_group_rss_mib", lambda *_args, **_kwargs: 10
+    )
+    monkeypatch.setattr(_DETACHED_JOB, "_read_memavailable_mib", lambda: 49)
+    assert guard.observe(123) is True
+    assert guard.state == "TRIGGERED"
+    assert "MemAvailable" in guard.trigger_reason
+    assert guard.observed_rss_mib == 10
+    assert guard.lowest_memavailable_mib == 49
+
+
+@pytest.mark.skipif(
     sys.platform == "win32", reason="runtime resource guard uses POSIX process groups"
 )
 def test_runtime_guard_ignores_zombie_group_member_during_short_job(
