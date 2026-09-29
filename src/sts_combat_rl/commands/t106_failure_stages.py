@@ -147,7 +147,11 @@ def _native_source_qualified() -> None:
 
 
 def _readiness_qualified(
-    path: Path | None, implementation_head: str, worker_count: int
+    path: Path | None,
+    implementation_head: str,
+    worker_count: int,
+    native_binary: Path,
+    native_binary_sha256: str,
 ) -> None:
     if path is None:
         raise T106IncompleteError(
@@ -162,12 +166,17 @@ def _readiness_qualified(
         text=True,
     ).stdout.strip()
     plan = approval.get("resource_plan")
+    approved_binary = approval.get("native_binary")
     if (
         approval.get("task_id") != "T106"
         or approval.get("implementation_head") != implementation_head
         or actual_head != implementation_head
         or approval.get("full_execution_authorized") is not True
         or approval.get("worker_count") != worker_count
+        or not isinstance(approved_binary, Mapping)
+        or approved_binary.get("path") != str(native_binary.resolve())
+        or approved_binary.get("sha256") != native_binary_sha256
+        or approved_binary.get("source_commit") != NATIVE_IDENTITY["commit"]
         or not isinstance(approval.get("approval_comment_url"), str)
         or "github.com/lsmfttb/STSRL/pull/122#issuecomment-"
         not in approval["approval_comment_url"]
@@ -180,7 +189,7 @@ def _readiness_qualified(
         or not plan["status_path"]
     ):
         raise T106IncompleteError(
-            "full execution readiness does not bind this head and resource plan"
+            "full execution readiness does not bind this head, native build, and resource plan"
         )
 
 
@@ -289,7 +298,11 @@ def run_from_paths(args: argparse.Namespace) -> dict:
     full = len(positions) == 343
     if full:
         _readiness_qualified(
-            args.full_readiness_approval, args.implementation_head, count
+            args.full_readiness_approval,
+            args.implementation_head,
+            count,
+            args.native_binary,
+            args.native_binary_sha256,
         )
     _native_source_qualified()
     if t103_command._sha256_file(args.native_binary) != args.native_binary_sha256:

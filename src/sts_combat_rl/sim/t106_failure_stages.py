@@ -10,6 +10,7 @@ from typing import Any
 from sts_combat_rl.sim.t101_particle_convergence import derive_t101_sampler_seed
 from sts_combat_rl.sim.t103_particle_diagnostic import T103NativeRecordRunner
 from sts_combat_rl.sim.t105_native_stage_observability import (
+    FAILURE_CODES,
     STAGES_IN_EXECUTION_ORDER,
     validate_t105_stage_trace,
 )
@@ -96,8 +97,30 @@ def select_t104_part_b(rows: object) -> list[dict[str, Any]]:
     return selected
 
 
+def validate_t106_trace(value: object) -> Mapping[str, Any]:
+    """Bind every available safe particle index to the frozen [0, 2) call."""
+
+    trace = validate_t105_stage_trace(value)
+    rows = trace["particles"]
+    if len(rows) > 2:
+        raise ValueError("T106 trace exceeds the frozen two-particle request")
+    seen: set[int] = set()
+    previous = -1
+    for row in rows:
+        index = row["particle_index"]
+        if index is None:
+            continue
+        if index not in (0, 1) or index in seen or index <= previous:
+            raise ValueError("T106 particle index disagrees with frozen request")
+        seen.add(index)
+        previous = index
+    return trace
+
+
 def classify_trace(value: object) -> tuple[str, Mapping[str, Any]]:
-    trace = validate_t105_stage_trace(value, expected_status="failed_closed")
+    trace = validate_t106_trace(value)
+    if trace["attempt_status"] != "failed_closed":
+        raise ValueError("T106 failed bridge requires failed-closed native telemetry")
     stage = trace["first_failed_stage"]
     cls = (
         "REQUEST_OR_PREFLIGHT_FAILURE" if stage is None else f"{stage.upper()}_FAILURE"
@@ -168,31 +191,36 @@ class T106NativeRecordRunner:
             "search_simulations": 400,
             "include_potions": False,
         }
-        if capture.get("call_parameters") != expected_call:
-            raise T106IncompleteError(
-                "frozen bridge invocation was not reached exactly"
-            )
+        invoked = "call_parameters" in capture
+        if not invoked and baseline.get("restore_status") != "succeeded":
+            raise T106IncompleteError("accepted restore or source binding unavailable")
+        if not invoked and baseline.get("diagnostic_class") not in {
+            "PUBLIC_PROJECTION_PARITY_FAILURE",
+            "ORDERED_LEGAL_ACTION_PARITY_FAILURE",
+            "BRIDGE_PRECONDITION_OR_SAMPLER_FAILURE",
+        }:
+            raise T106IncompleteError("pre-bridge observation is unavailable")
+        if invoked and capture["call_parameters"] != expected_call:
+            raise T106IncompleteError("frozen bridge invocation parameters differ")
+        if invoked and capture.get("bridge_outcome") not in {"exception", "returned"}:
+            raise T106IncompleteError("bridge invocation outcome unavailable")
         outcome = capture.get("bridge_outcome")
-        contradiction = (
-            outcome != "exception"
-            or baseline.get("bridge_invocation_status") != "failed"
-        )
+        contradiction = not invoked or outcome == "returned"
         trace = capture.get("trace")
         violation = False
         stage_class = None
-        if trace is not None:
+        if not invoked:
+            validated = None
+        elif trace is not None:
             try:
-                validated = validate_t105_stage_trace(trace)
-                if validated["attempt_status"] == "accepted":
-                    contradiction = True
-                if contradiction:
-                    if (
-                        outcome == "returned"
-                        and validated["attempt_status"] != "accepted"
-                    ):
+                validated = validate_t106_trace(trace)
+                if outcome == "exception":
+                    if validated["attempt_status"] == "failed_closed":
+                        stage_class, validated = classify_trace(trace)
+                    else:
                         violation = True
-                else:
-                    stage_class, validated = classify_trace(trace)
+                elif validated["attempt_status"] != "accepted":
+                    violation = True
             except (ValueError, TypeError, KeyError):
                 violation = True
                 validated = None
@@ -212,9 +240,14 @@ class T106NativeRecordRunner:
             "current_native_identity": NATIVE_IDENTITY,
             "replicate_index": 0,
             "sampler_seed": accepted["sampler_seed"],
-            "bridge_call_parameters": expected_call,
-            "bridge_outcome": outcome,
+            "frozen_expected_bridge_call_parameters": expected_call,
+            "bridge_call_parameters": capture.get("call_parameters"),
+            "bridge_outcome": outcome if invoked else "not_invoked",
             "bridge_invocation_status": baseline.get("bridge_invocation_status"),
+            "pre_bridge_restore_status": baseline.get("restore_status"),
+            "pre_bridge_diagnostic_class": baseline.get("diagnostic_class"),
+            "pre_bridge_subreason_code": baseline.get("subreason_code"),
+            "pre_bridge_change": not invoked,
             "baseline_contradiction": contradiction,
             "telemetry_contract_violation": violation,
             "telemetry_error_type": capture.get("trace_error_type"),
@@ -252,13 +285,16 @@ def aggregate(rows: Sequence[Mapping[str, Any]], *, full: bool) -> dict[str, Any
         else "INCOMPLETE"
     )
 
+    def fraction(count: int, total: int) -> dict[str, int] | None:
+        return {"numerator": count, "denominator": total} if total else None
+
     def counts(
         key: str, domain: Sequence[str], subset: Sequence[Mapping[str, Any]]
     ) -> dict[str, Any]:
         n = len(subset)
         count = Counter(r[key] for r in subset)
         return {
-            name: {"count": count[name], "fraction": count[name] / n if n else 0.0}
+            name: {"count": count[name], "fraction": fraction(count[name], n)}
             for name in domain
         }
 
@@ -274,7 +310,7 @@ def aggregate(rows: Sequence[Mapping[str, Any]], *, full: bool) -> dict[str, Any
         )
         for s in HISTORICAL_T104_CLASSES
     }
-    codes = sorted({r["native_stage_trace"]["failure_code"] for r in good})
+    codes = sorted(FAILURE_CODES)
     stage_code = {}
     for cls in STAGE_CLASSES:
         class_total = sum(r["stage_class"] == cls for r in good)
@@ -287,10 +323,8 @@ def aggregate(rows: Sequence[Mapping[str, Any]], *, full: bool) -> dict[str, Any
             )
             stage_code[cls][code] = {
                 "count": count,
-                "fraction_of_valid_replays": count / len(good) if good else 0.0,
-                "fraction_within_stage_class": count / class_total
-                if class_total
-                else 0.0,
+                "fraction_of_valid_replays": fraction(count, len(good)),
+                "fraction_within_stage_class": fraction(count, class_total),
             }
     first_indices: Counter[int] = Counter()
     signatures: Counter[tuple[str, ...]] = Counter()
@@ -331,19 +365,22 @@ def aggregate(rows: Sequence[Mapping[str, Any]], *, full: bool) -> dict[str, Any
         "first_failing_particle_index": {
             str(index): {
                 "count": count,
-                "fraction_of_valid_replays": count / len(good) if good else 0.0,
+                "fraction_of_valid_replays": fraction(count, len(good)),
             }
             for index, count in sorted(first_indices.items())
         },
         "first_failing_particle_index_unavailable_count": len(good)
         - sum(first_indices.values()),
+        "first_failing_particle_index_unavailable_fraction": fraction(
+            len(good) - sum(first_indices.values()), len(good)
+        ),
         "stage_status_transition_signatures": [
             {
                 "statuses": dict(
                     zip(STAGES_IN_EXECUTION_ORDER, signature, strict=True)
                 ),
                 "count": count,
-                "fraction_of_particle_rows": count / sum(signatures.values()),
+                "fraction_of_particle_rows": fraction(count, sum(signatures.values())),
             }
             for signature, count in sorted(signatures.items())
         ],

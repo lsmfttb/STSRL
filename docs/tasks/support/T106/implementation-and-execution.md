@@ -36,6 +36,11 @@ review of the exact implementation head and resource plan. Required fields are:
   "full_execution_authorized": true,
   "approval_comment_url": "https://github.com/lsmfttb/STSRL/pull/122#issuecomment-<id>",
   "worker_count": 4,
+  "native_binary": {
+    "path": "/home/lsmft/stsrl-spikes/build-t106-native-5afae22-py313/slaythespire.cpython-313-x86_64-linux-gnu.so",
+    "sha256": "5c30a764470e71b3e7b75e97aaecfd6d51b5c1dc9feaf3455140108069ec4019",
+    "source_commit": "5afae22def0c69657b0139bfa21306aebac831af"
+  },
   "resource_plan": {
     "supervision": "detached_resource_guard",
     "summed_rss_limit_mib": 16384,
@@ -65,4 +70,13 @@ bounded exception signature for audit. The command stops subsequent shard work
 on a baseline contradiction or invalid trace; terminal precedence is baseline
 contradiction, then telemetry violation, then complete census, otherwise
 `INCOMPLETE`. Partial evidence remains retained for review. The generated
-report is diagnostic only and cannot qualify repair or convergence work.
+report stores exact fractions as integer `numerator`/`denominator` pairs;
+`null` means a zero-sized denominator. It is diagnostic only and cannot qualify
+repair or convergence work.
+
+A returned bridge report is a T104 baseline contradiction. A failed bridge with
+an otherwise valid native trace claiming `accepted` is a T105 telemetry
+contradiction, and the safe trace is retained. A directly observed public or
+precondition failure after a successful restore but before bridge invocation is
+a changed T104 baseline; unavailable restore/source bindings or an opaque
+pre-bridge observation remain `INCOMPLETE`.
