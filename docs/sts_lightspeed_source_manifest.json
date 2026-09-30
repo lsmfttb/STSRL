@@ -9,7 +9,7 @@
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
     "branch": "stsrl/main",
     "ref": "refs/heads/stsrl/main",
-    "commit": "5afae22def0c69657b0139bfa21306aebac831af"
+    "commit": "1458522294d967e8985e1fd52cc15d7ebe7f2acd"
   },
   "python_module": {
     "name": "slaythespire",
@@ -340,6 +340,53 @@
         "StepSimulator.stsr007_particle_search_stage_audit.search_setup_failure_attributed",
         "StepSimulator.stsr007_particle_search_stage_audit.search_execution_failure_attributed",
         "StepSimulator.stsr007_particle_search_stage_audit.sanitized_report_failure_attributed"
+      ]
+    },
+    {
+      "id": "native_stsr008_root_occurrence_mapping_observability",
+      "description": "Additive structured subreason observability for existing root-occurrence mapping control flow. The per-particle diagnostic distinguishes the seven fail-closed mapping branches from successful mapping completion without changing mapping, Search, sampler, projection, fidelity, or RNG behavior. It identifies a mapping control-flow subreason, not a game-mechanics root cause or repair efficacy. The bounded diagnostic exposes only safe public occurrence/action-kind metadata and aggregate public/root-edge/mapping/coverage counts with match multiplicities; it excludes raw action bits, specialData, hidden Battle/Search/RNG/intent/trajectory state, and exception prose. Deterministic audit witnesses use fixed private test injections unavailable to production bridge callers.",
+      "task_provenance": [
+        "T107"
+      ],
+      "required_python_api": [
+        "StepSimulator.last_particle_search_stage_diagnostics",
+        "StepSimulator.last_particle_search_stage_diagnostics.schema_id.native-particle-search-stage-observability-v1",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.schema_id.native-root-occurrence-mapping-diagnostic-v1",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.status.entered|failed|completed",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.no_public_legal_action_surface",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.multiple_direct_search_root_matches",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.missing_non_card_direct_search_root_match",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.card_not_adjacent_mechanical_duplicate",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.representative_search_root_match_zero",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.representative_search_root_match_multiple",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.uncovered_search_root_edge",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.mapping_completed",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.public_legal_occurrence_count",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.search_root_edge_count",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.public_occurrences_mapped",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.search_root_edges_covered",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.direct_mapping_count",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mechanical_duplicate_mapping_count",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.public_occurrence_index",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.public_action_kind",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.direct_match_multiplicity.zero|one|multiple",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.representative_match_multiplicity.zero|one|multiple",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.schema_id.native-stsr008-root-occurrence-mapping-audit-v1",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.success_completion_reported",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.success_root_report_semantics_preserved",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.no_public_surface_classified",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.multiple_direct_classified",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.missing_non_card_classified",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.representative_ineligible_classified",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.representative_zero_classified",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.representative_multiple_classified",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.uncovered_edge_classified",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.not_reached_absent",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.later_particle_not_mapping_attempted",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.snapshot_attempt_isolation",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.diagnostic_field_whitelist"
       ]
     }
   ],

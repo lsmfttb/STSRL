@@ -45,6 +45,42 @@ def test_stage_trace_accepts_only_structured_success_and_real_order() -> None:
     )
 
 
+def test_optional_t107_field_is_accepted_only_with_its_native_mapping_stage() -> None:
+    trace = _accepted_trace()
+    row = trace["particles"][0]
+    row["stages"]["root_occurrence_mapping"] = "not_reached"
+    row["stages"]["sanitized_root_report"] = "not_reached"
+    row.update(
+        first_failed_stage="search_setup",
+        failure_code="native_exception",
+    )
+    row["stages"]["search_setup"] = "failed"
+    for stage in STAGES_IN_EXECUTION_ORDER[
+        STAGES_IN_EXECUTION_ORDER.index("search_setup") + 1 :
+    ]:
+        row["stages"][stage] = "not_reached"
+    trace.update(
+        attempt_status="failed_closed",
+        first_failed_stage="search_setup",
+        failure_code="native_exception",
+        accepted_root_report_returned=False,
+    )
+    row["root_occurrence_mapping_diagnostic"] = None
+    assert validate_t105_stage_trace(trace) == trace
+
+    invalid = deepcopy(trace)
+    invalid["particles"][0]["stages"]["root_occurrence_mapping"] = "entered"
+    with pytest.raises(ValueError, match="absent after mapping"):
+        validate_t105_stage_trace(invalid)
+
+
+def test_t105_particle_row_rejects_other_additive_fields() -> None:
+    trace = _accepted_trace()
+    trace["particles"][0]["unreviewed_field"] = "not allowed"
+    with pytest.raises(ValueError, match="optional STSRL-008"):
+        validate_t105_stage_trace(trace)
+
+
 def test_stage_trace_rejects_private_or_exception_payload_fields() -> None:
     for location, key in (
         ("top", "BattleContext"),
