@@ -167,6 +167,23 @@ replay Part A, change native source, run N>2 convergence, train or promote a
 controller. See the [T106 execution record](tasks/support/T106/maintainer-execution.md)
 and [task archive](tasks/ARCHIVE.md) for exact provenance and retained evidence.
 
+Post-T106 Planner review, including an external architecture audit of
+`SnyderConsulting/sts_ml`, does not change the accepted T106 census. The external
+solver is relevant only as architecture evidence: it demonstrates a separate
+public-belief-style design that shares Search by public semantic action/history
+identity instead of reconstructing public occurrence identity after Search. That
+widens the later repair design space but is not accepted STSRL correctness,
+particle-convergence, or public-fidelity evidence. For the exact 323 T106
+root-occurrence-mapping failures, the currently accepted structured surface is
+insufficient to distinguish the materially different production mapping
+branches without guessing; the selected successor is therefore native issue
+[`STSRL-008`](https://github.com/lsmfttb/sts_lightspeed/issues/23), limited to
+non-secret mapping-subreason observability and explicitly not repair. The 20
+public-fidelity-stage failures remain a separate diagnosis lane: current accepted
+public projection exposes enough typed information for a bounded invariant-family
+classification without a new native API. Neither lane authorizes N>2 convergence,
+training, promotion, T034 closure, or T063/T066 activation.
+
 The retained closed-route conclusions remain available through the task archive
 and contracts, including the earlier Oracle-guided Search, later-act reach,
 root-prior allocation, curriculum, value-target, and Non-Combat investigations.
