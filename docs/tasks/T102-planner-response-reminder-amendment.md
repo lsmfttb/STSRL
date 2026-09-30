@@ -183,6 +183,62 @@ The blocker record ends automatic Planner continuation for that turn and makes
 handoff explicit. It must not disguise an ordinary transient omission as a
 workflow blocker.
 
+## Terminal-Evidence Preflight
+
+For a matching durable Planner decision with `continuation_owner: PLANNER`,
+Maintainer must run a terminal-evidence preflight before any completed/blocked
+transition and before deciding that the continuation is still unresolved.
+
+The current continuation identity is the tuple:
+
+```text
+notification_id
+planner_decision_comment_id
+decision_exact_head
+continuation_action_kind
+continuation_action_key
+```
+
+A completion/blocker record is a **relevant terminal candidate** when it purports
+to belong to the current request/decision by matching either the current
+`notification_id` or the current `planner_decision_comment_id`. A record that
+matches neither is unrelated terminal evidence for another transaction and must
+not terminate or corrupt this continuation.
+
+Preflight then validates every relevant candidate against the full current
+continuation identity and its record-kind schema:
+
+- `notification_id` and `planner_decision_comment_id` must both match exactly;
+- `decision_exact_head`, `continuation_action_kind`, and
+  `continuation_action_key` must match the durable Planner decision exactly;
+- completion records must have `status: COMPLETED` and valid completion evidence;
+- blocker records must have `status: BLOCKED`, a non-empty blocker, and a valid
+  `next_owner`; and
+- all required protocol/repository/task/PR correlation fields must be present
+  and internally consistent.
+
+The preflight result is one of exactly four classes:
+
+1. `NO_RELEVANT_TERMINAL_EVIDENCE`: zero relevant candidates exist. Only this
+   result permits ordinary unresolved `PLANNER` waiting/reminder handling.
+2. `ONE_VALID_COMPLETION`: exactly one relevant candidate exists and it is one
+   valid completion record. Transition to `PLANNER_CONTINUATION_COMPLETED`.
+3. `ONE_VALID_BLOCKER`: exactly one relevant candidate exists and it is one
+   valid blocker record. Transition to `PLANNER_CONTINUATION_BLOCKED`.
+4. `TERMINAL_EVIDENCE_INVALID`: fail closed. This class includes any malformed
+   relevant record, any relevant record with mismatched full correlation fields,
+   completion plus blocker together, more than one completion, more than one
+   blocker, duplicate terminal records, or any other case with more than one
+   relevant terminal candidate.
+
+Do not deduplicate terminal records by payload equality, choose one by recency,
+or accept the first applicable record. More than one relevant terminal record is
+ambiguous even when two records are byte-for-byte equivalent.
+
+`TERMINAL_EVIDENCE_INVALID` stops automatic continuation recovery and suppresses
+continuation reminders until explicit/manual correction. A malformed relevant
+record must never be reinterpreted as if no terminal evidence existed.
+
 ## Pre-Decision Reminder Eligibility
 
 A `PLANNER_REVIEW_REMINDER` is permitted only when all of the following are true:
@@ -206,8 +262,7 @@ true:
 
 1. a matching durable Planner decision exists;
 2. that decision has `continuation_owner: PLANNER`;
-3. neither a valid matching continuation-complete record nor a matching
-   continuation-blocked record exists;
+3. terminal-evidence preflight returned `NO_RELEVANT_TERMINAL_EVIDENCE`;
 4. the continuation action identity still matches the durable decision;
 5. the governing workflow has not made the action obsolete;
 6. the current Planner route can be resolved under the metadata-current routing
@@ -357,34 +412,30 @@ in this order:
 
 1. **No matching durable Planner decision:** remain
    `WAITING_FOR_PLANNER_DECISION`; issue bounded review reminders when eligible.
-2. **A matching continuation completion record exists for a matching
-   `continuation_owner: PLANNER` decision:** validate notification id, Planner
-   decision comment id, decision exact head, action kind/key, status, and
-   completion evidence. If valid, enter `PLANNER_CONTINUATION_COMPLETED`, stop
-   Planner waiting, and resume from the completed durable state. Do not send a
-   continuation reminder.
-3. **A matching continuation blocker record exists for a matching
-   `continuation_owner: PLANNER` decision:** validate the same correlation
-   identity plus blocker/next-owner fields. If valid, enter
-   `PLANNER_CONTINUATION_BLOCKED`, stop automatic Planner waiting, and follow the
-   recorded handoff/blocker. Do not send a continuation reminder.
-4. **Decision says `continuation_owner: MAINTAINER`:** enter `HANDOFF_READY`,
+2. **Matching decision says `continuation_owner: PLANNER`:** run the complete
+   terminal-evidence preflight before any terminal transition or unresolved wait.
+   - `TERMINAL_EVIDENCE_INVALID`: fail closed for automatic continuation
+     recovery, send no continuation reminder, and require explicit/manual
+     correction.
+   - `ONE_VALID_COMPLETION`: enter `PLANNER_CONTINUATION_COMPLETED`, stop Planner
+     waiting, and resume from the completed durable state.
+   - `ONE_VALID_BLOCKER`: enter `PLANNER_CONTINUATION_BLOCKED`, stop automatic
+     Planner waiting, and follow the recorded handoff/blocker.
+   - `NO_RELEVANT_TERMINAL_EVIDENCE`: remain
+     `WAITING_FOR_PLANNER_CONTINUATION`; issue a bounded continuation reminder
+     only when all reminder-eligibility conditions hold.
+3. **Decision says `continuation_owner: MAINTAINER`:** enter `HANDOFF_READY`,
    stop Planner waiting, and resume the Maintainer-owned workflow.
-5. **Decision says `continuation_owner: NONE`:** enter `HANDOFF_READY`, stop
+4. **Decision says `continuation_owner: NONE`:** enter `HANDOFF_READY`, stop
    Planner waiting; the Planner-owned part of this request is complete.
-6. **Decision says `continuation_owner: PLANNER` and no valid matching
-   completion or blocker exists:** remain `WAITING_FOR_PLANNER_CONTINUATION`;
-   do not treat the decision itself as completion and issue a bounded
-   continuation reminder only when eligible.
-7. **Malformed, contradictory, or multiply matching terminal evidence:** fail
-   closed for automatic continuation recovery. Do not choose one by recency and
-   do not send another reminder as if the state were merely unresolved; require
-   explicit/manual correction.
+5. **Malformed or contradictory Planner decision continuation fields:** fail
+   closed and require explicit/manual correction; do not infer ownership from
+   prose and do not send a continuation reminder.
 
-Terminal continuation evidence therefore has precedence over the unresolved
-Planner-wait branch. A literal ordered implementation must consume a valid
-matching completion or blocker before it can conclude that a Planner-owned
-continuation is still pending.
+A literal implementation must complete the terminal-evidence preflight as one
+atomic classification step. It must not branch on the first terminal record it
+encounters and must not test “no valid terminal record” as a substitute for
+`NO_RELEVANT_TERMINAL_EVIDENCE`.
 
 ## Stop Conditions
 
@@ -393,8 +444,8 @@ appears or the request becomes stale/closed/obsolete.
 
 Stop continuation reminders immediately when:
 
-- matching durable completion appears;
-- matching durable blocker appears;
+- terminal-evidence preflight returns anything other than
+  `NO_RELEVANT_TERMINAL_EVIDENCE`;
 - the action becomes obsolete;
 - route resolution fails closed;
 - two continuation reminders have already been delivered in the active turn; or
@@ -452,34 +503,41 @@ bounded protocol canary must demonstrate at least:
 7. every future T102-triggered Planner decision has valid continuation fields;
 8. `continuation_owner: MAINTAINER` and `NONE` end Planner waiting without a
    continuation reminder;
-9. `continuation_owner: PLANNER` with no valid matching completion or blocker
-   keeps Maintainer in bounded continuation waiting;
-10. a `continuation_owner: PLANNER` decision plus a valid matching
-    `PLANNER_CONTINUATION_COMPLETE` record is resolved as completed before the
-    unresolved-PLANNER branch, exits Planner waiting, and sends no further
+9. `continuation_owner: PLANNER` with zero relevant terminal candidates produces
+   `NO_RELEVANT_TERMINAL_EVIDENCE` and remains in bounded continuation waiting;
+10. a PLANNER-owned decision plus malformed relevant terminal evidence returns
+    `TERMINAL_EVIDENCE_INVALID`, fails closed, and sends no continuation reminder;
+11. one matching completion plus one matching blocker returns
+    `TERMINAL_EVIDENCE_INVALID`; neither record may win by ordering or recency;
+12. multiple matching completions or multiple matching blockers, including
+    byte-identical duplicates, return `TERMINAL_EVIDENCE_INVALID`;
+13. exactly one valid relevant completion returns `ONE_VALID_COMPLETION`, enters
+    `PLANNER_CONTINUATION_COMPLETED` before waiting, and sends no further
     continuation reminder;
-11. a `continuation_owner: PLANNER` decision plus a valid matching
-    `PLANNER_CONTINUATION_BLOCKED` record is resolved as blocked before the
-    unresolved-PLANNER branch, exits automatic Planner waiting, follows the
-    recorded handoff, and sends no further continuation reminder;
-12. mismatched completion/blocker correlation fields do not terminate waiting
-    for the referenced continuation; contradictory or multiply matching terminal
-    evidence fails closed rather than being selected by recency;
-13. a continuation reminder binds the original notification, decision comment,
+14. exactly one valid relevant blocker returns `ONE_VALID_BLOCKER`, enters
+    `PLANNER_CONTINUATION_BLOCKED` before waiting, follows the recorded handoff,
+    and sends no further continuation reminder;
+15. a relevant candidate with matching notification or decision id but missing
+    or mismatching another required correlation field is malformed and fails
+    closed; it must not be treated as no terminal evidence;
+16. terminal records matching neither the current notification id nor current
+    Planner decision comment id are unrelated and do not terminate the current
+    continuation;
+17. a continuation reminder binds the original notification, decision comment,
     exact decision head, action kind, and action key;
-14. already-completed continuation with a missing completion record is reconciled
+18. already-completed continuation with a missing completion record is reconciled
     without replaying the action;
-15. duplicate/reminder delivery does not duplicate a Planner decision or unsafe
+19. duplicate/reminder delivery does not duplicate a Planner decision or unsafe
     continuation action;
-16. final-review same-head dual acceptance is represented as Planner-owned
+20. final-review same-head dual acceptance is represented as Planner-owned
     `MERGE_PR` continuation and reaches either verified landing completion or a
     durable blocker; and
-17. reaching either reminder cap or total wait budget falls back to explicit
+21. reaching either reminder cap or total wait budget falls back to explicit
     manual recovery rather than looping indefinitely.
 
-The focused verification for items 10 and 11 is mandatory; it must model the
-ordered poll evaluation itself, not merely test reminder eligibility in
-isolation.
+The focused ordered-evaluation verification for items 10 through 14 is
+mandatory. It must exercise the preflight and ordered poll evaluation itself,
+not merely reminder eligibility in isolation.
 
 A fixture/test may model final landing without merging a live scientific PR. A
 live canary, if used, must be non-authoritative and must not create scientific or
