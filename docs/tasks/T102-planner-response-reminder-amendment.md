@@ -351,24 +351,40 @@ when the governing workflow's required role records say so.
 
 ## Maintainer Polling State Machine
 
-After direct delivery, Maintainer remains in bounded polling and evaluates
-states in this order:
+After direct delivery, Maintainer remains in bounded polling. Each poll derives
+one state from the complete durable evidence set and evaluates these conditions
+in this order:
 
 1. **No matching durable Planner decision:** remain
    `WAITING_FOR_PLANNER_DECISION`; issue bounded review reminders when eligible.
-2. **Decision says `continuation_owner: MAINTAINER`:** stop Planner waiting and
-   resume the Maintainer-owned workflow.
-3. **Decision says `continuation_owner: NONE`:** stop Planner waiting; the
-   Planner-owned part of this request is complete.
-4. **Decision says `continuation_owner: PLANNER`:** remain
-   `WAITING_FOR_PLANNER_CONTINUATION`; do not treat the decision itself as
-   completion.
-5. **Matching continuation completion appears:** validate evidence, then resume
-   from the completed durable state.
-6. **Matching continuation blocker appears:** stop automatic Planner waiting and
-   follow the recorded handoff/blocker.
+2. **A matching continuation completion record exists for a matching
+   `continuation_owner: PLANNER` decision:** validate notification id, Planner
+   decision comment id, decision exact head, action kind/key, status, and
+   completion evidence. If valid, enter `PLANNER_CONTINUATION_COMPLETED`, stop
+   Planner waiting, and resume from the completed durable state. Do not send a
+   continuation reminder.
+3. **A matching continuation blocker record exists for a matching
+   `continuation_owner: PLANNER` decision:** validate the same correlation
+   identity plus blocker/next-owner fields. If valid, enter
+   `PLANNER_CONTINUATION_BLOCKED`, stop automatic Planner waiting, and follow the
+   recorded handoff/blocker. Do not send a continuation reminder.
+4. **Decision says `continuation_owner: MAINTAINER`:** enter `HANDOFF_READY`,
+   stop Planner waiting, and resume the Maintainer-owned workflow.
+5. **Decision says `continuation_owner: NONE`:** enter `HANDOFF_READY`, stop
+   Planner waiting; the Planner-owned part of this request is complete.
+6. **Decision says `continuation_owner: PLANNER` and no valid matching
+   completion or blocker exists:** remain `WAITING_FOR_PLANNER_CONTINUATION`;
+   do not treat the decision itself as completion and issue a bounded
+   continuation reminder only when eligible.
+7. **Malformed, contradictory, or multiply matching terminal evidence:** fail
+   closed for automatic continuation recovery. Do not choose one by recency and
+   do not send another reminder as if the state were merely unresolved; require
+   explicit/manual correction.
 
-This ordering is the core fix for the post-decision stall class.
+Terminal continuation evidence therefore has precedence over the unresolved
+Planner-wait branch. A literal ordered implementation must consume a valid
+matching completion or blocker before it can conclude that a Planner-owned
+continuation is still pending.
 
 ## Stop Conditions
 
@@ -436,19 +452,34 @@ bounded protocol canary must demonstrate at least:
 7. every future T102-triggered Planner decision has valid continuation fields;
 8. `continuation_owner: MAINTAINER` and `NONE` end Planner waiting without a
    continuation reminder;
-9. `continuation_owner: PLANNER` keeps Maintainer in bounded waiting until a
-   matching completion or blocker appears;
-10. a continuation reminder binds the original notification, decision comment,
+9. `continuation_owner: PLANNER` with no valid matching completion or blocker
+   keeps Maintainer in bounded continuation waiting;
+10. a `continuation_owner: PLANNER` decision plus a valid matching
+    `PLANNER_CONTINUATION_COMPLETE` record is resolved as completed before the
+    unresolved-PLANNER branch, exits Planner waiting, and sends no further
+    continuation reminder;
+11. a `continuation_owner: PLANNER` decision plus a valid matching
+    `PLANNER_CONTINUATION_BLOCKED` record is resolved as blocked before the
+    unresolved-PLANNER branch, exits automatic Planner waiting, follows the
+    recorded handoff, and sends no further continuation reminder;
+12. mismatched completion/blocker correlation fields do not terminate waiting
+    for the referenced continuation; contradictory or multiply matching terminal
+    evidence fails closed rather than being selected by recency;
+13. a continuation reminder binds the original notification, decision comment,
     exact decision head, action kind, and action key;
-11. already-completed continuation with a missing completion record is reconciled
+14. already-completed continuation with a missing completion record is reconciled
     without replaying the action;
-12. duplicate/reminder delivery does not duplicate a Planner decision or unsafe
+15. duplicate/reminder delivery does not duplicate a Planner decision or unsafe
     continuation action;
-13. final-review same-head dual acceptance is represented as Planner-owned
+16. final-review same-head dual acceptance is represented as Planner-owned
     `MERGE_PR` continuation and reaches either verified landing completion or a
     durable blocker; and
-14. reaching either reminder cap or total wait budget falls back to explicit
+17. reaching either reminder cap or total wait budget falls back to explicit
     manual recovery rather than looping indefinitely.
+
+The focused verification for items 10 and 11 is mandatory; it must model the
+ordered poll evaluation itself, not merely test reminder eligibility in
+isolation.
 
 A fixture/test may model final landing without merging a live scientific PR. A
 live canary, if used, must be non-authoritative and must not create scientific or
