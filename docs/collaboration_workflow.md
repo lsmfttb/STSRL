@@ -115,10 +115,10 @@ terminal-evidence preflight before either accepting a terminal transition or
 remaining in continuation wait. Relevant terminal candidates are correlated to
 the current notification and Planner-decision identity, then validated against
 the full exact-head/action identity. Exactly one valid completion or blocker may
-terminate waiting. Malformed relevant evidence, completion-plus-blocker,
-duplicate/multiple terminal records, or contradictory correlation fails closed
-and suppresses reminders. Only zero relevant terminal candidates permits
-ordinary continuation waiting. Unrelated terminal records for another request or
+terminate waiting. `TERMINAL_EVIDENCE_INVALID` (malformed relevant evidence,
+completion-plus-blocker, duplicate/multiple terminal records, or contradictory
+correlation) fails closed and suppresses reminders. Only zero relevant terminal
+candidates permits ordinary continuation waiting. Unrelated terminal records for another request or
 decision do not terminate the current continuation.
 
 A durable Planner decision is therefore not automatically the end of the
