@@ -20,6 +20,8 @@ from sts_combat_rl.sim.t107_native_root_mapping_observability import (
     validate_t107_mapping_audit,
 )
 
+MAX_BATTLE_ENTRY_ACTIONS = 200
+
 
 def _rejects_injection(call, label: str) -> None:
     try:
@@ -27,6 +29,58 @@ def _rejects_injection(call, label: str) -> None:
     except TypeError:
         return
     raise SystemExit(f"production native API accepted test injection: {label}")
+
+
+def _is_active_player_battle(snapshot: object) -> bool:
+    return (
+        isinstance(snapshot, dict)
+        and snapshot.get("screen_state") == "BATTLE"
+        and snapshot.get("battle_active") is True
+        and snapshot.get("battle_input_state") == "PLAYER_NORMAL"
+    )
+
+
+def _enter_active_player_battle(sim, *, max_actions: int = MAX_BATTLE_ENTRY_ACTIONS):
+    if (
+        isinstance(max_actions, bool)
+        or not isinstance(max_actions, int)
+        or max_actions < 0
+    ):
+        raise ValueError("max_actions must be a non-negative integer")
+
+    snapshot = sim.snapshot()
+    if _is_active_player_battle(snapshot):
+        return snapshot
+
+    for _ in range(max_actions):
+        actions = sim.legal_actions()
+        if not isinstance(actions, list) or not actions:
+            raise SystemExit(
+                "could not reach an active PLAYER_NORMAL battle: "
+                "legal_actions returned no actions"
+            )
+        snapshot = sim.step(actions[0])
+        if not isinstance(snapshot, dict):
+            raise SystemExit(
+                "could not reach an active PLAYER_NORMAL battle: "
+                "step returned a non-object snapshot"
+            )
+        if _is_active_player_battle(snapshot):
+            return snapshot
+
+    raise SystemExit(
+        "could not reach an active PLAYER_NORMAL battle within "
+        f"{max_actions} legal-action steps"
+    )
+
+
+def _bridge_call_in_active_battle(
+    sim, bridge_call, *, max_actions=MAX_BATTLE_ENTRY_ACTIONS
+):
+    snapshot = _enter_active_player_battle(sim, max_actions=max_actions)
+    if not _is_active_player_battle(snapshot):
+        raise SystemExit("bridge call requires an active PLAYER_NORMAL battle")
+    return bridge_call(17, 0, 2, 1, False)
 
 
 def main() -> None:
@@ -62,7 +116,9 @@ def main() -> None:
         "caller-selected audit injection",
     )
 
-    bridge = validate_t099_particle_search_bridge(bridge_call(17, 0, 2, 1, False))
+    bridge = validate_t099_particle_search_bridge(
+        _bridge_call_in_active_battle(sim, bridge_call)
+    )
     trace = validate_t105_stage_trace(
         sim.last_particle_search_stage_diagnostics(),
         expected_status="accepted",

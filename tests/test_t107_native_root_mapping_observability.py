@@ -4,6 +4,10 @@ from copy import deepcopy
 
 import pytest
 
+from scripts.test_stsr008_root_occurrence_mapping_observability import (
+    MAX_BATTLE_ENTRY_ACTIONS,
+    _bridge_call_in_active_battle,
+)
 from sts_combat_rl.sim.t107_native_root_mapping_observability import (
     AUDIT_PREDICATES,
     AUDIT_SCHEMA,
@@ -25,6 +29,59 @@ def _counts(**overrides: int) -> dict[str, int]:
     }
     counts.update(overrides)
     return counts
+
+
+class _BoundedBattleSetup:
+    def __init__(self, *, battle_after: int | None) -> None:
+        self.battle_after = battle_after
+        self.step_count = 0
+        self.bridge_calls = 0
+        self.snapshot_value = {
+            "screen_state": "MAP",
+            "battle_active": False,
+            "battle_input_state": "NONE",
+        }
+
+    def snapshot(self) -> dict[str, object]:
+        return dict(self.snapshot_value)
+
+    def legal_actions(self) -> list[str]:
+        return ["advance"]
+
+    def step(self, _action: str) -> dict[str, object]:
+        self.step_count += 1
+        if self.battle_after is not None and self.step_count >= self.battle_after:
+            self.snapshot_value = {
+                "screen_state": "BATTLE",
+                "battle_active": True,
+                "battle_input_state": "PLAYER_NORMAL",
+            }
+        return self.snapshot()
+
+    def bridge(self, *_args: object) -> dict[str, object]:
+        assert self.snapshot_value == {
+            "screen_state": "BATTLE",
+            "battle_active": True,
+            "battle_input_state": "PLAYER_NORMAL",
+        }
+        self.bridge_calls += 1
+        return {"accepted": True}
+
+
+def test_smoke_bridge_requires_active_player_battle_and_obeys_action_bound() -> None:
+    ready = _BoundedBattleSetup(battle_after=2)
+    result = _bridge_call_in_active_battle(
+        ready, ready.bridge, max_actions=MAX_BATTLE_ENTRY_ACTIONS
+    )
+    assert result == {"accepted": True}
+    assert ready.step_count == 2
+    assert ready.bridge_calls == 1
+
+    never_ready = _BoundedBattleSetup(battle_after=None)
+    with pytest.raises(SystemExit, match="within 2 legal-action steps"):
+        _bridge_call_in_active_battle(never_ready, never_ready.bridge, max_actions=2)
+    assert never_ready.step_count == 2
+    assert never_ready.bridge_calls == 0
 
 
 def _diagnostic(
