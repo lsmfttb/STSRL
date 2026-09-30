@@ -212,10 +212,11 @@ Maintainer's task. In the same workflow, the Main Maintainer must:
 If that next action is Planner-owned, use the routing and decision-authority
 rules in [`collaboration_workflow.md`](collaboration_workflow.md) and the
 copyable templates and exact mechanics in the normative T102 protocol package:
-[`T102 Phase-B contract`](tasks/T102-agent-planner-notification-protocol.md)
-and its same-ID
-[`resume-identity amendment`](tasks/T102-resume-operation-identity-amendment.md)
-and [`metadata-current routing amendment`](tasks/T102-route-binding-amendment.md).
+[`T102 Phase-B contract`](tasks/T102-agent-planner-notification-protocol.md),
+its same-ID
+[`resume-identity amendment`](tasks/T102-resume-operation-identity-amendment.md),
+[`metadata-current routing amendment`](tasks/T102-route-binding-amendment.md),
+and [`review-reminder and workflow-continuation recovery amendment`](tasks/T102-planner-response-reminder-amendment.md).
 The routing amendment supersedes the primary contract's assertion/generation/
 binding-based route-selection and route-related canary prose; non-routing T102
 semantics remain unchanged. Immediately before each distinct direct
@@ -237,14 +238,42 @@ the same active turn for bounded, task-specific PR polling. Chat delivery is
 not a decision receipt, and a detached-job heartbeat is not the wait mechanism
 for ordinary Planner review.
 
+Maintainer must distinguish waiting for the Planner decision from waiting for a
+Planner-owned continuation. If no matching durable decision exists, remain in
+`WAITING_FOR_PLANNER_DECISION`. If a matching decision declares
+`continuation_owner: PLANNER`, first run the recovery amendment's complete
+terminal-evidence preflight. Only zero relevant terminal candidates permits
+`WAITING_FOR_PLANNER_CONTINUATION` and its bounded reminder path. Exactly one
+valid completion or blocker resolves the wait. Malformed relevant evidence,
+completion plus blocker, duplicate/multiple terminal records, or contradictory
+correlation fails closed and suppresses reminders until explicit/manual
+correction.
+
+Do not return to the user, dispatch new Implementer work, or pretend the Planner
+handoff is complete while a required Planner-owned continuation is unresolved.
+A durable Planner decision alone is not sufficient when it declares
+`continuation_owner: PLANNER`; the current Maintainer turn remains responsible
+for bounded polling until a matching durable completion/blocker appears, the
+wait budget/cap reaches the documented manual-recovery boundary, or the action
+becomes obsolete. Every reminder reruns metadata-current routing and has no
+authority of its own.
+
+For final-review landing, if same-head Maintainer acceptance already exists and
+Planner records final `PASS` with no intervening-role requirement, the declared
+continuation is Planner-owned `MERGE_PR`. Maintainer must not return or dispatch
+new work merely because the PASS comment appeared; it waits for verified landing
+completion or a durable continuation blocker. Planner is responsible for the
+pre-landing race/head/mergeability checks, exact-expected-head merge,
+post-merge `main` verification, and durable completion record.
+
 Before automatically continuing after a Planner decision, verify the exact
 request/head correlation and follow the T102 recoverable-resume rule: retries
 require an idempotent action or a durable completion predicate bound to the
 stable action identity; publish a completed ACK only after that predicate is
-true. If route resolution or completion cannot be proved, stale state is
-observed, or the Maintainer turn has ended, stop automatic handling and use the
-documented manual/user recovery path. T102 does not promise restart-safe or
-exactly-once recovery.
+true. If route resolution, terminal-evidence classification, or completion
+cannot be proved, stale state is observed, or the Maintainer turn has ended,
+stop automatic handling and use the documented manual/user recovery path. T102
+does not promise restart-safe or exactly-once recovery.
 
 Do not return to the user with only “Implementer finished” when the receipt
 contains a commit, PR, artifact, test result, or explicit next step that the
@@ -261,6 +290,19 @@ DISPATCHED -> ACTIVE -> TURN_COMPLETED -> READ -> VERIFIED -> CONTINUE -> HANDOF
                   |                                           -> one status retry
                   |                                           -> VERIFIED or BLOCKED
                   +-> TIMEOUT (remain ACTIVE; no duplicate launch)
+```
+
+For a Planner-owned handoff, `HANDOFF` is not reached merely by receiving a
+Planner decision. The continuation sub-state is derived separately:
+
+```text
+WAITING_FOR_PLANNER_DECISION
+    -> decision owner MAINTAINER/NONE -> HANDOFF_READY
+    -> decision owner PLANNER -> terminal-evidence preflight
+         -> ONE_VALID_COMPLETION -> PLANNER_CONTINUATION_COMPLETED
+         -> ONE_VALID_BLOCKER -> PLANNER_CONTINUATION_BLOCKED
+         -> NO_RELEVANT_TERMINAL_EVIDENCE -> WAITING_FOR_PLANNER_CONTINUATION
+         -> TERMINAL_EVIDENCE_INVALID -> manual correction (no reminder)
 ```
 
 `BLOCKED` means a concrete external, contract, permission, or user-input
