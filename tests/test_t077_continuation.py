@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import sts_combat_rl.sim.t077_continuation as t077_source
 from sts_combat_rl.commands.t077_continuation import (
     StageResult,
     T077ScientificFailure,
@@ -108,9 +109,51 @@ def test_selected_cohort_validation_is_streaming_and_exact(tmp_path: Path) -> No
 def test_source_manifest_binds_t076_integration() -> None:
     manifest = verify_t076_source_manifest(Path(__file__).parents[1])
 
-    assert manifest["integration_commit"] == "5afae22def0c69657b0139bfa21306aebac831af"
+    assert manifest["integration_commit"] == "1458522294d967e8985e1fd52cc15d7ebe7f2acd"
     assert manifest["t076_lineage_anchor"] == T077_ACCEPTED_T076_INTEGRATION
     assert manifest["integration_branch"] == "stsrl/main"
+
+
+def test_t077_source_manifest_boundary_keeps_historical_pins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    accepted_commits = (
+        "cc40c8cc51cc3f1e5ccb9d67bc4bccdf635ba083",
+        "1555348535d66e3035aac80933a60949d4bd850f",
+        "5afae22def0c69657b0139bfa21306aebac831af",
+        "1458522294d967e8985e1fd52cc15d7ebe7f2acd",
+    )
+
+    def manifest_for(commit: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            integration=SimpleNamespace(
+                repository_url="https://github.com/lsmfttb/sts_lightspeed.git",
+                branch="stsrl/main",
+                ref="refs/heads/stsrl/main",
+                commit=commit,
+            ),
+            schema_id="sts-lightspeed-source-manifest-v1",
+            manifest_version=1,
+        )
+
+    for commit in accepted_commits:
+        monkeypatch.setattr(
+            t077_source,
+            "load_lightspeed_source_manifest",
+            lambda _path, commit=commit: manifest_for(commit),
+        )
+        assert (
+            t077_source.verify_t076_source_manifest(Path("."))["integration_commit"]
+            == commit
+        )
+
+    monkeypatch.setattr(
+        t077_source,
+        "load_lightspeed_source_manifest",
+        lambda _path: manifest_for("a" * 40),
+    )
+    with pytest.raises(ValueError, match="outside the accepted native lineage"):
+        t077_source.verify_t076_source_manifest(Path("."))
 
 
 def test_callable_workflow_stops_at_valid_gate_failure_with_t077_lineage(

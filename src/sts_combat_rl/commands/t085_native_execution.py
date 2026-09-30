@@ -184,11 +184,17 @@ T105_STAGE_OBSERVABILITY_NATIVE_IDENTITY = {
     "ref": "refs/heads/stsrl/main",
     "commit": "5afae22def0c69657b0139bfa21306aebac831af",
 }
+T107_ROOT_MAPPING_NATIVE_IDENTITY = {
+    "repository": "lsmfttb/sts_lightspeed",
+    "ref": "refs/heads/stsrl/main",
+    "commit": "1458522294d967e8985e1fd52cc15d7ebe7f2acd",
+}
 _T085_ACCEPTED_RUNTIME_IDENTITIES = (
     dict(T085_NATIVE_IDENTITY),
     dict(T085_PRE_T088_TELEMETRY_NATIVE_IDENTITY),
     dict(T085_ACTIVE_NATIVE_IDENTITY),
     dict(T105_STAGE_OBSERVABILITY_NATIVE_IDENTITY),
+    dict(T107_ROOT_MAPPING_NATIVE_IDENTITY),
 )
 _T085_PROVENANCE_NATIVE_IDENTITY_KEYS = frozenset(
     {"native_identity", "native_source_identity"}

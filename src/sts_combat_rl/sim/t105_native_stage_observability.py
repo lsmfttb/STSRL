@@ -10,6 +10,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from sts_combat_rl.sim.t107_native_root_mapping_observability import (
+    validate_t107_mapping_diagnostic,
+)
+
 TRACE_SCHEMA = "native-particle-search-stage-observability-v1"
 AUDIT_SCHEMA = "native-stsr007-particle-search-stage-audit-v1"
 STAGES_IN_EXECUTION_ORDER = (
@@ -89,11 +93,17 @@ def validate_t105_stage_trace(
 
     failed_rows = []
     for ordinal, value_row in enumerate(rows):
-        row = _object(
-            value_row,
-            {"particle_index", "stages", "first_failed_stage", "failure_code"},
-            "STSRL-007 particle row",
-        )
+        row_fields = {"particle_index", "stages", "first_failed_stage", "failure_code"}
+        additive_mapping_field = "root_occurrence_mapping_diagnostic"
+        if not isinstance(value_row, Mapping) or frozenset(value_row) not in {
+            frozenset(row_fields),
+            frozenset(row_fields | {additive_mapping_field}),
+        }:
+            raise ValueError(
+                "STSRL-007 particle row must contain exactly the legacy fields "
+                "and the optional STSRL-008 mapping diagnostic"
+            )
+        row = value_row
         index = row["particle_index"]
         if index is not None and (
             isinstance(index, bool) or not isinstance(index, int) or index < 0
@@ -106,6 +116,11 @@ def validate_t105_stage_trace(
         )
         if any(stage_status not in STAGE_STATUSES for stage_status in stages.values()):
             raise ValueError("STSRL-007 stage status is invalid")
+        if additive_mapping_field in row:
+            validate_t107_mapping_diagnostic(
+                row[additive_mapping_field],
+                mapping_stage_status=stages["root_occurrence_mapping"],
+            )
         failed_stage = row["first_failed_stage"]
         code = row["failure_code"]
         failed = [
