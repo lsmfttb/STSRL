@@ -32,6 +32,7 @@ REQUIRED_NATIVE_CAPABILITY_IDS = (
     "native_t096_public_information_hidden_future_sampler",
     "native_stsr006_particle_search_bridge",
     "native_stsr007_particle_search_stage_observability",
+    "native_stsr008_root_occurrence_mapping_observability",
 )
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 

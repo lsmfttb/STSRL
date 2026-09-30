@@ -1569,6 +1569,42 @@ def test_t085_runtime_identity_boundary_accepts_only_historical_or_current(
         == t085_execution.T085_NATIVE_IDENTITY
     )
 
+    # The newly integrated T107 source is an exact additive current-runtime pin;
+    # all historical pins above remain individually accepted.
+    for identity in t085_execution._T085_ACCEPTED_RUNTIME_IDENTITIES:
+        monkeypatch.setattr(
+            t085_execution,
+            "load_lightspeed_source_manifest",
+            lambda identity=identity: manifest_for(identity["commit"]),
+        )
+        assert (
+            t085_execution._validate_t085_native_source_manifest("battle_search_v2")
+            == identity
+        )
+        assert (
+            t085_execution._validate_t085_native_source_manifest(
+                "battle_search_v2", expected_native_identity=identity
+            )
+            == identity
+        )
+
+    t107_identity = t085_execution.T107_ROOT_MAPPING_NATIVE_IDENTITY
+    assert t107_identity["commit"] == "1458522294d967e8985e1fd52cc15d7ebe7f2acd"
+    monkeypatch.setattr(
+        t085_execution,
+        "load_lightspeed_source_manifest",
+        lambda: manifest_for(t107_identity["commit"]),
+    )
+    with pytest.raises(T085NativeExecutionError, match="not an approved identity"):
+        t085_execution._validate_t085_native_source_manifest(
+            "battle_search_v2",
+            expected_native_identity={
+                "repository": "lsmfttb/sts_lightspeed",
+                "ref": "refs/heads/stsrl/main",
+                "commit": "97f59b620efe5ee1571f8da298c99d1e21c1149b",
+            },
+        )
+
 
 def test_restore_base_then_prime_reset_does_not_search_or_reset() -> None:
     events: list[str] = []

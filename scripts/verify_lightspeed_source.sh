@@ -83,6 +83,11 @@ echo "sts_lightspeed source manifest: $manifest_schema_id v$manifest_version"
 echo "upstream: $upstream_url @ $base_commit"
 echo "integration: $integration_url $integration_ref @ $integration_commit"
 
+if [[ "$integration_commit" != "1458522294d967e8985e1fd52cc15d7ebe7f2acd" ]]; then
+    echo "T107 requires the exact reviewed STSRL-008 merge result" >&2
+    exit 1
+fi
+
 if ! git -C "$source_checkout" fetch --no-tags "$integration_url" "$integration_ref"; then
     echo "failed to fetch pinned integration ref" >&2
     exit 1
@@ -106,6 +111,22 @@ fi
 if ! git -C "$source_checkout" merge-base --is-ancestor \
     38ab89618495dfc8b8e996fbcca44a93e5c18cfe "$integration_commit"; then
     echo "T105 integration commit does not contain the reviewed native head" >&2
+    exit 1
+fi
+if ! git -C "$source_checkout" merge-base --is-ancestor \
+    5afae22def0c69657b0139bfa21306aebac831af "$integration_commit"; then
+    echo "T107 integration commit does not descend from the accepted T105 pin" >&2
+    exit 1
+fi
+if ! git -C "$source_checkout" merge-base --is-ancestor \
+    264dcacaf9236cd133d8e9147186ad3698b42a3f "$integration_commit"; then
+    echo "T107 integration commit does not contain the reviewed STSRL-008 head" >&2
+    exit 1
+fi
+if ! git -C "$source_checkout" diff --quiet \
+    264dcacaf9236cd133d8e9147186ad3698b42a3f \
+    "$integration_commit" --; then
+    echo "T107 merge result differs from the reviewed STSRL-008 tree" >&2
     exit 1
 fi
 
@@ -165,6 +186,9 @@ from sts_combat_rl.sim.t105_native_stage_observability import (
     validate_t105_stage_audit,
     validate_t105_stage_trace,
 )
+from sts_combat_rl.sim.t107_native_root_mapping_observability import (
+    validate_t107_mapping_audit,
+)
 
 
 def fail(message: str) -> None:
@@ -220,11 +244,71 @@ for method_name in (
     "stsr006_particle_search_audit",
     "last_particle_search_stage_diagnostics",
     "stsr007_particle_search_stage_audit",
+    "stsr008_root_occurrence_mapping_audit",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
 ):
     if not hasattr(sim, method_name):
         fail(f"StepSimulator.{method_name} is missing")
+
+def require_rejected_injection(call, label):
+    try:
+        call()
+    except TypeError:
+        return
+    fail(f"production API unexpectedly accepts test injection: {label}")
+
+
+bridge_method = sim.sample_hidden_future_particles_search
+require_rejected_injection(
+    lambda: bridge_method(1, 0, 1, 1, False, "ROOT_MAPPING_NO_PUBLIC_ACTIONS"),
+    "positional bridge injection",
+)
+require_rejected_injection(
+    lambda: bridge_method(
+        1, 0, 1, 1, False, injection="ROOT_MAPPING_NO_PUBLIC_ACTIONS"
+    ),
+    "keyword bridge injection",
+)
+require_rejected_injection(
+    lambda: sim.stsr008_root_occurrence_mapping_audit(
+        "ROOT_MAPPING_NO_PUBLIC_ACTIONS"
+    ),
+    "caller-selected audit injection",
+)
+
+mapping_audit = sim.stsr008_root_occurrence_mapping_audit()
+validate_t107_mapping_audit(mapping_audit)
+mapping_audit_fields = {
+    "schema_id",
+    "success_completion_reported",
+    "success_root_report_semantics_preserved",
+    "no_public_surface_classified",
+    "multiple_direct_classified",
+    "missing_non_card_classified",
+    "representative_ineligible_classified",
+    "representative_zero_classified",
+    "representative_multiple_classified",
+    "uncovered_edge_classified",
+    "not_reached_absent",
+    "later_particle_not_mapping_attempted",
+    "snapshot_attempt_isolation",
+    "diagnostic_field_whitelist",
+}
+if not isinstance(mapping_audit, dict) or set(mapping_audit) != mapping_audit_fields:
+    fail("STSRL-008 audit returned an unexpected or non-whitelisted result shape")
+if mapping_audit.get("schema_id") != "native-stsr008-root-occurrence-mapping-audit-v1":
+    fail("STSRL-008 audit schema id mismatch")
+if any(
+    type(value) is not bool
+    for key, value in mapping_audit.items()
+    if key != "schema_id"
+):
+    fail("STSRL-008 audit summary fields must be booleans")
+if not all(
+    value for key, value in mapping_audit.items() if key != "schema_id"
+):
+    fail("STSRL-008 mapping subreason/safety audit did not pass")
 
 snapshot = sim.snapshot()
 if not isinstance(snapshot, dict):
@@ -695,6 +779,7 @@ observed_capabilities = {
     "native_t096_public_information_hidden_future_sampler",
     "native_stsr006_particle_search_bridge",
     "native_stsr007_particle_search_stage_observability",
+    "native_stsr008_root_occurrence_mapping_observability",
 }
 missing = sorted(observed_capabilities.difference(expected_capabilities))
 if missing:
@@ -711,5 +796,8 @@ python3 scripts/test_t096_particle_search_bridge.py --build-dir "$build_dir"
 python3 scripts/test_battle_search_v2_tree_geometry.py --build-dir "$build_dir"
 python3 scripts/test_battle_search_v2_state_utilization.py --build-dir "$build_dir"
 python3 scripts/test_stsr007_particle_search_stage_observability.py --build-dir "$build_dir"
+PYTHONPATH="$worktree/$build_dir:$repo_root/src" python3 \
+    "$repo_root/scripts/test_stsr008_root_occurrence_mapping_observability.py" \
+    --build-dir "$build_dir"
 
 echo "clean sts_lightspeed pinned-source build passed"

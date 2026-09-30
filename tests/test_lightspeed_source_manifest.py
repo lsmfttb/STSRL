@@ -36,7 +36,7 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
     )
     assert manifest.integration.branch == "stsrl/main"
     assert manifest.integration.ref == "refs/heads/stsrl/main"
-    assert manifest.integration.commit == ("5afae22def0c69657b0139bfa21306aebac831af")
+    assert manifest.integration.commit == ("1458522294d967e8985e1fd52cc15d7ebe7f2acd")
     assert set(REQUIRED_NATIVE_CAPABILITY_IDS).issubset(manifest.capability_ids)
     assert "native_battle_search_root" in manifest.capability_ids
     assert "native_root_prior_allocation" in manifest.capability_ids
@@ -53,6 +53,10 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
     assert "native_stsr006_particle_search_bridge" in manifest.capability_ids
     assert (
         "native_stsr007_particle_search_stage_observability" in manifest.capability_ids
+    )
+    assert (
+        "native_stsr008_root_occurrence_mapping_observability"
+        in manifest.capability_ids
     )
     assert manifest.legacy_patch_stack.status == "retired_provenance"
 
@@ -207,6 +211,67 @@ def test_t105_canonical_source_verifier_requires_lineage_and_native_witnesses() 
         "module.__file__",
         "scripts/test_battle_search_v2_state_utilization.py",
         "scripts/test_stsr007_particle_search_stage_observability.py",
+    ):
+        assert required_check in verifier
+
+
+def test_t107_native_capability_is_additive_and_requires_mapping_audit() -> None:
+    manifest = load_lightspeed_source_manifest()
+    capability = next(
+        item
+        for item in manifest.supported_native_capabilities
+        if item.capability_id == "native_stsr008_root_occurrence_mapping_observability"
+    )
+
+    assert "native_stsr006_particle_search_bridge" in manifest.capability_ids
+    assert (
+        "native_stsr007_particle_search_stage_observability" in manifest.capability_ids
+    )
+    assert capability.task_provenance == ("T107",)
+    for semantic in (
+        "control flow",
+        "not a game-mechanics root cause",
+        "raw action bits",
+        "specialData",
+        "exception prose",
+        "unavailable to production bridge callers",
+    ):
+        assert semantic in capability.description
+    for api in (
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.schema_id.native-root-occurrence-mapping-diagnostic-v1",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.no_public_legal_action_surface",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.multiple_direct_search_root_matches",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.missing_non_card_direct_search_root_match",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.card_not_adjacent_mechanical_duplicate",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.representative_search_root_match_zero",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.representative_search_root_match_multiple",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.uncovered_search_root_edge",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.mapping_subreason.mapping_completed",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.schema_id.native-stsr008-root-occurrence-mapping-audit-v1",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.success_root_report_semantics_preserved",
+        "StepSimulator.stsr008_root_occurrence_mapping_audit.diagnostic_field_whitelist",
+    ):
+        assert api in capability.required_python_api
+
+
+def test_t107_canonical_source_verifier_requires_lineage_and_audit_witnesses() -> None:
+    verifier = (
+        Path(__file__).parents[1] / "scripts" / "verify_lightspeed_source.sh"
+    ).read_text(encoding="utf-8")
+    for required_check in (
+        "1458522294d967e8985e1fd52cc15d7ebe7f2acd",
+        "5afae22def0c69657b0139bfa21306aebac831af",
+        "264dcacaf9236cd133d8e9147186ad3698b42a3f",
+        'git -C "$source_checkout" diff --quiet',
+        '"stsr008_root_occurrence_mapping_audit"',
+        '"native_stsr008_root_occurrence_mapping_observability"',
+        "require_rejected_injection",
+        "positional bridge injection",
+        "keyword bridge injection",
+        "caller-selected audit injection",
+        "mapping_audit_fields",
+        '"$repo_root/scripts/test_stsr008_root_occurrence_mapping_observability.py"',
+        'PYTHONPATH="$worktree/$build_dir"',
     ):
         assert required_check in verifier
 

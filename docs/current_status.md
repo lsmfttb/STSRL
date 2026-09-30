@@ -41,6 +41,13 @@ their distributions, labels, and evaluation reports remain separate.
   not diagnose game-mechanics root cause or change the T099 bridge result and
   failure semantics. [Execution evidence](tasks/support/T105/maintainer-execution.md)
   records the lineage and clean-source verification.
+- T107 accepted STSRL-008's additive
+  `native-root-occurrence-mapping-diagnostic-v1` capability at
+  `refs/heads/stsrl/main @ 1458522294d967e8985e1fd52cc15d7ebe7f2acd`.
+  It provides fail-closed, non-secret root-occurrence mapping subreason
+  observability. T105 remains the historical stage-observability provenance;
+  T107 does not change T099 bridge semantics or diagnose/repair any T106 case.
+  See the [T107 execution evidence](tasks/support/T107/maintainer-execution.md).
 - CommunicationMod formatting remains centralized in
   `src/sts_combat_rl/comm/protocol.py`; CLI modules route to command workflows.
 
@@ -151,8 +158,8 @@ See the [T104 execution record](tasks/support/T104/maintainer-execution.md) for
 exact counts, hashes, producer/resource evidence and minimal observability needs.
 No native change, mechanics repair or convergence execution was performed.
 
-T105 source acceptance makes a later bounded T104 diagnostic re-entry eligible
-for a separate Planner task; it does not authorize that replay or any repair.
+T105's accepted stage trace was used by the bounded T104 diagnostic re-entry
+completed in T106; T105 did not authorize a mechanics repair or convergence.
 T063 and T066 remain non-active scientific directions; see
 [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md) for their exact lifecycle and terminal
 meanings. No task is promoted merely by appearing in a document or Planner Issue.
@@ -169,20 +176,15 @@ and [task archive](tasks/ARCHIVE.md) for exact provenance and retained evidence.
 
 Post-T106 Planner review, including an external architecture audit of
 `SnyderConsulting/sts_ml`, does not change the accepted T106 census. The external
-solver is relevant only as architecture evidence: it demonstrates a separate
-public-belief-style design that shares Search by public semantic action/history
-identity instead of reconstructing public occurrence identity after Search. That
-widens the later repair design space but is not accepted STSRL correctness,
-particle-convergence, or public-fidelity evidence. For the exact 323 T106
-root-occurrence-mapping failures, the currently accepted structured surface is
-insufficient to distinguish the materially different production mapping
-branches without guessing; the selected successor is therefore native issue
-[`STSRL-008`](https://github.com/lsmfttb/sts_lightspeed/issues/23), limited to
-non-secret mapping-subreason observability and explicitly not repair. The 20
-public-fidelity-stage failures remain a separate diagnosis lane: current accepted
-public projection exposes enough typed information for a bounded invariant-family
-classification without a new native API. Neither lane authorizes N>2 convergence,
-training, promotion, T034 closure, or T063/T066 activation.
+solver remains architecture evidence only, not accepted STSRL correctness,
+particle-convergence, or public-fidelity evidence. T107 has now accepted
+STSRL-008's exact-source root-occurrence mapping subreason observability
+capability as `NATIVE_ROOT_OCCURRENCE_MAPPING_OBSERVABILITY_ACCEPTED`; this is a
+source/capability result, not a replay or mechanics diagnosis. A separate
+Planner-published exact-323 mapping-subreason diagnostic re-entry is eligible
+but has not been authorized or executed. The 20 public-fidelity-stage failures
+remain a separate diagnosis lane. T107 authorizes no mapping repair, N>2
+convergence, training, promotion, T034 closure, or T063/T066 activation.
 
 The retained closed-route conclusions remain available through the task archive
 and contracts, including the earlier Oracle-guided Search, later-act reach,
