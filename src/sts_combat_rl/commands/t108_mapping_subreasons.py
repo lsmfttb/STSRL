@@ -398,6 +398,7 @@ def _readiness_qualified(
     worker_count: int,
     native_binary: Path,
     native_binary_sha256: str,
+    resource_status_path: Path,
 ) -> dict[str, Any]:
     if path is None:
         raise T108IncompleteError(
@@ -411,13 +412,32 @@ def _readiness_qualified(
         capture_output=True,
         text=True,
     ).stdout.strip()
+    worktree_status = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository_root),
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     plan = approval.get("resource_plan")
     approved_binary = approval.get("native_binary")
     expected_scope = "full_population" if full else "bounded_canary"
+    approved_status_path = (
+        Path(plan["status_path"])
+        if isinstance(plan, dict) and isinstance(plan.get("status_path"), str)
+        else None
+    )
     if (
         approval.get("task_id") != "T108"
         or approval.get("implementation_head") != implementation_head
         or actual_head != implementation_head
+        or bool(worktree_status)
         or approval.get("execution_authorized") is not True
         or approval.get("execution_scope") != expected_scope
         or approval.get("candidate_positions") != positions
@@ -437,14 +457,20 @@ def _readiness_qualified(
         or plan.get("sample_interval_s") != 1
         or not isinstance(plan.get("status_path"), str)
         or not plan["status_path"]
+        or not resource_status_path.is_absolute()
+        or approved_status_path is None
+        or not approved_status_path.is_absolute()
+        or approved_status_path != resource_status_path
+        or approved_status_path.resolve() != resource_status_path.resolve()
     ):
         raise T108IncompleteError(
-            "T108 readiness does not bind the exact head, selection, binary, and resource plan"
+            "T108 readiness does not bind the clean exact head, selection, binary, and resource plan"
         )
     return {
         "path": str(path.resolve()),
         "sha256": _sha256(path),
         "approval_comment_url": approval["approval_comment_url"],
+        "resource_status_path": str(resource_status_path),
         "resource_plan": plan,
     }
 
@@ -594,6 +620,7 @@ def run_from_paths(args: argparse.Namespace) -> dict[str, Any]:
         worker_count=worker_count,
         native_binary=args.native_binary,
         native_binary_sha256=args.native_binary_sha256,
+        resource_status_path=args.resource_status_path,
     )
 
     started = time.perf_counter()
@@ -748,6 +775,7 @@ def run_from_paths(args: argparse.Namespace) -> dict[str, Any]:
         "replay_wall_clock_time_s": replay_wall,
         "native_bridge_gil_released": False,
         "readiness_approval": readiness,
+        "resource_status_path": readiness["resource_status_path"],
         "native_binary": {
             "path": str(args.native_binary.resolve()),
             "sha256": args.native_binary_sha256,
@@ -797,6 +825,7 @@ def build_parser() -> argparse.ArgumentParser:
         parser.add_argument(f"--{name}", type=Path)
     parser.add_argument("--native-binary-sha256")
     parser.add_argument("--readiness-approval", type=Path)
+    parser.add_argument("--resource-status-path", type=Path)
     parser.add_argument("--worker-count", type=int)
     parser.add_argument("--lower-worker-reason")
     parser.add_argument("--candidate-positions", type=int, nargs="+")
@@ -809,6 +838,7 @@ def _require_replay_arguments(args: argparse.Namespace) -> None:
         "output_root",
         "native_binary",
         "native_binary_sha256",
+        "resource_status_path",
     )
     missing = [name for name in required if getattr(args, name) is None]
     if missing:

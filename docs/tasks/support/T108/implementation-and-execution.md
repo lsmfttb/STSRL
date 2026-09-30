@@ -64,12 +64,15 @@ native build are independently verified:
 
 Every replay scope, including a later bounded canary, requires a T108 readiness
 JSON bound to the exact implementation head, exact positions, native binary
-path/hash/source commit, worker count, and detached-guard status path. The
-full-population readiness additionally requires
-`full_population_authorized: true` and all 323 ordered positions. The approval
-must cite a Maintainer comment on PR #126. The command will not start a replay
-without that file and rejects a readiness record for another head, subset, or
-binary.
+path/hash/source commit, worker count, and detached-guard status path. Pass that
+same absolute path as `resource_plan.status_path` in readiness and as
+`--resource-status-path` to the replay command; a mismatch is rejected. The
+command also rejects a dirty worktree, including staged, unstaged, or untracked
+files, even when `HEAD` matches the approval. The full-population readiness
+additionally requires `full_population_authorized: true` and all 323 ordered
+positions. The approval must cite a Maintainer comment on PR #126. The command
+will not start a replay without that file and rejects a readiness record for
+another head, subset, status path, or binary.
 
 The eventual full command uses the four T106 artifact paths above and:
 
@@ -79,6 +82,7 @@ The eventual full command uses the four T106 artifact paths above and:
 --native-binary <fresh T107-pin build path>
 --native-binary-sha256 <independently verified SHA-256>
 --readiness-approval <exact-head Maintainer readiness JSON>
+--resource-status-path /mnt/d/DeadlyCatCoding/STSRL/artifacts/t108-root-occurrence-mapping-subreason-diagnostic-41a789a/full-323-attempt-1/t108-resource-guard-status.json
 --worker-count 4
 --lower-worker-reason "Reuse T106's accepted four-worker resource calibration and guard."
 ```

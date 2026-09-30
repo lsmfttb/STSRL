@@ -19,6 +19,22 @@ from sts_combat_rl.sim.t108_mapping_subreasons import (
 )
 
 
+def _mock_git_state(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    head: str,
+    worktree_status: dict[str, str],
+) -> None:
+    def run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        if command[-2:] == ["rev-parse", "HEAD"]:
+            return SimpleNamespace(stdout=f"{head}\n")
+        if command[-3:] == ["status", "--porcelain=v1", "--untracked-files=all"]:
+            return SimpleNamespace(stdout=worktree_status["value"])
+        raise AssertionError(f"unexpected git command: {command}")
+
+    monkeypatch.setattr(command.subprocess, "run", run)
+
+
 def test_t106_report_gate_requires_accepted_full_terminal() -> None:
     report = {
         "schema_id": T106_REPORT_SCHEMA,
@@ -52,6 +68,19 @@ def test_t106_report_gate_requires_accepted_full_terminal() -> None:
     report["stage_classes"][T106_ROOT_CLASS]["count"] = 322
     with pytest.raises(T108IncompleteError, match="stage-class counts"):
         command._validate_t106_report(report)
+
+
+def test_replay_requires_an_explicit_resource_status_path() -> None:
+    args = SimpleNamespace(
+        implementation_head="a" * 40,
+        output_root=Path("/tmp/t108-output"),
+        native_binary=Path("/tmp/slaythespire.so"),
+        native_binary_sha256="b" * 64,
+        resource_status_path=None,
+    )
+
+    with pytest.raises(T108IncompleteError, match="resource_status_path"):
+        command._require_replay_arguments(args)
 
 
 def test_retention_manifest_binds_t108_rows_report_execution_and_provenance(
@@ -116,6 +145,8 @@ def test_readiness_binds_exact_head_selection_native_binary_and_resource_plan(
     native_binary = tmp_path / "slaythespire.cpython-313.so"
     native_binary.write_bytes(b"native fixture")
     positions = [0, 1]
+    resource_status_path = tmp_path / "stable" / "t108.status.json"
+    git_state = {"value": ""}
     readiness_path = tmp_path / "readiness.json"
     readiness = {
         "task_id": "T108",
@@ -135,15 +166,11 @@ def test_readiness_binds_exact_head_selection_native_binary_and_resource_plan(
             "summed_rss_limit_mib": 16384,
             "mem_available_floor_mib": 8192,
             "sample_interval_s": 1,
-            "status_path": "/stable/t108.status.json",
+            "status_path": str(resource_status_path),
         },
     }
     readiness_path.write_text(json.dumps(readiness), encoding="utf-8")
-    monkeypatch.setattr(
-        command.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(stdout=f"{implementation_head}\n"),
-    )
+    _mock_git_state(monkeypatch, head=implementation_head, worktree_status=git_state)
 
     qualified = command._readiness_qualified(
         path=readiness_path,
@@ -153,8 +180,34 @@ def test_readiness_binds_exact_head_selection_native_binary_and_resource_plan(
         worker_count=1,
         native_binary=native_binary,
         native_binary_sha256="c" * 64,
+        resource_status_path=resource_status_path,
     )
     assert qualified["approval_comment_url"] == readiness["approval_comment_url"]
+    assert qualified["resource_status_path"] == str(resource_status_path.resolve())
+    with pytest.raises(T108IncompleteError, match="clean exact head"):
+        command._readiness_qualified(
+            path=readiness_path,
+            implementation_head=implementation_head,
+            positions=positions,
+            full=False,
+            worker_count=1,
+            native_binary=native_binary,
+            native_binary_sha256="c" * 64,
+            resource_status_path=tmp_path / "stable" / "other.status.json",
+        )
+    git_state["value"] = "?? local_untracked_code.py\n"
+    with pytest.raises(T108IncompleteError, match="clean exact head"):
+        command._readiness_qualified(
+            path=readiness_path,
+            implementation_head=implementation_head,
+            positions=positions,
+            full=False,
+            worker_count=1,
+            native_binary=native_binary,
+            native_binary_sha256="c" * 64,
+            resource_status_path=resource_status_path,
+        )
+    git_state["value"] = ""
     readiness["candidate_positions"] = [1, 0]
     readiness_path.write_text(json.dumps(readiness), encoding="utf-8")
     with pytest.raises(T108IncompleteError, match="does not bind"):
@@ -166,6 +219,7 @@ def test_readiness_binds_exact_head_selection_native_binary_and_resource_plan(
             worker_count=1,
             native_binary=native_binary,
             native_binary_sha256="c" * 64,
+            resource_status_path=resource_status_path,
         )
 
 
@@ -177,6 +231,7 @@ def test_population_readiness_requires_separate_full_population_authorization(
     native_binary.write_bytes(b"native fixture")
     readiness_path = tmp_path / "readiness.json"
     positions = list(range(323))
+    resource_status_path = tmp_path / "stable" / "t108-full.status.json"
     readiness = {
         "task_id": "T108",
         "implementation_head": implementation_head,
@@ -195,14 +250,14 @@ def test_population_readiness_requires_separate_full_population_authorization(
             "summed_rss_limit_mib": 16384,
             "mem_available_floor_mib": 8192,
             "sample_interval_s": 1,
-            "status_path": "/stable/t108-full.status.json",
+            "status_path": str(resource_status_path),
         },
     }
     readiness_path.write_text(json.dumps(readiness), encoding="utf-8")
-    monkeypatch.setattr(
-        command.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(stdout=f"{implementation_head}\n"),
+    _mock_git_state(
+        monkeypatch,
+        head=implementation_head,
+        worktree_status={"value": ""},
     )
     with pytest.raises(T108IncompleteError, match="does not bind"):
         command._readiness_qualified(
@@ -213,6 +268,7 @@ def test_population_readiness_requires_separate_full_population_authorization(
             worker_count=4,
             native_binary=native_binary,
             native_binary_sha256="e" * 64,
+            resource_status_path=resource_status_path,
         )
     readiness["full_population_authorized"] = True
     readiness_path.write_text(json.dumps(readiness), encoding="utf-8")
@@ -224,5 +280,6 @@ def test_population_readiness_requires_separate_full_population_authorization(
         worker_count=4,
         native_binary=native_binary,
         native_binary_sha256="e" * 64,
+        resource_status_path=resource_status_path,
     )
     assert qualified["resource_plan"]["summed_rss_limit_mib"] == 16384
