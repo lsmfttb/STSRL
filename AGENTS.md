@@ -225,7 +225,8 @@ authoritative source and overrides shorter summaries elsewhere.
 - After verifying Implementer work, route only genuine Planner-owned actions
   through the durable PR request and the T102 protocol package linked from
   [`docs/collaboration_workflow.md`](docs/collaboration_workflow.md), including
-  its [metadata-current routing amendment](docs/tasks/T102-route-binding-amendment.md).
+  its [metadata-current routing amendment](docs/tasks/T102-route-binding-amendment.md)
+  and [Planner response/continuation recovery amendment](docs/tasks/T102-planner-response-reminder-amendment.md).
   Immediately before each distinct direct notification, use ordinary unarchived
   `list_threads` only, filter to `kind=chatgpt` and `projectId` equal to
   `g-p-6a9985b51f44819186f65b74fe8af5da`, then send to the unique eligible
@@ -235,10 +236,18 @@ authoritative source and overrides shorter summaries elsewhere.
   use route generations, or retain a persistent/cached endpoint binding. Send
   only to the selected exact thread id. A send failure has no fallback route;
   if retrying, perform one fresh metadata selection and reuse the same durable
-  notification id. Chat remains notification-only; use bounded active-turn PR
-  polling and resume only with durable completion evidence. Manual recovery
-  remains required when routing or completion is ambiguous; do not claim
-  restart-safe recovery.
+  notification id. Chat remains notification-only. Maintainer distinguishes
+  `WAITING_FOR_PLANNER_DECISION` from `WAITING_FOR_PLANNER_CONTINUATION`; before
+  waiting/reminding on a Planner-owned continuation, run the full terminal-
+  evidence preflight. Only zero relevant terminal candidates permits ordinary
+  continuation waiting; one valid completion/blocker resolves it, while
+  malformed, contradictory, or duplicate/multiple relevant terminal evidence
+  fails closed with no reminder. If final same-head dual acceptance leaves a
+  Planner-owned `MERGE_PR`, Planner must continue through pre-landing checks,
+  expected-head merge, post-merge `main` verification, and durable completion or
+  blocker; the PASS comment alone is not a stopping point. Manual recovery
+  remains required when routing, terminal classification, or completion is
+  ambiguous; do not claim restart-safe recovery.
 - One task uses one fresh branch and one pull request based on latest `main`.
 - A ready-for-review pull request must satisfy the task's published
   deliverables, required artifacts, verification, and acceptance criteria.
