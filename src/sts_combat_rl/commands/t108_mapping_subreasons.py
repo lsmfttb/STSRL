@@ -47,6 +47,7 @@ from sts_combat_rl.sim.t108_mapping_subreasons import (
 )
 
 T106_PRODUCER = T106_IMPLEMENTATION_HEAD
+T101_TERMINAL_MANIFEST_SCHEMA = "t101-terminal-retention-manifest-v1"
 T106_REFERENCE_KEYS = {
     "rows": ("candidate_stages", T106_ROW_SCHEMA),
     "report": ("aggregate_report", T106_REPORT_SCHEMA),
@@ -209,6 +210,28 @@ def _path_from_retained_reference(reference: object, label: str) -> Path:
     return path
 
 
+def _t101_terminal_manifest_from_historical(historical: object) -> Path:
+    if not isinstance(historical, dict):
+        raise T108IncompleteError("T106 historical T101 binding is unavailable")
+    reference = historical.get("t101_terminal_retention_manifest")
+    path = _path_from_retained_reference(reference, "T101 terminal retention manifest")
+    if (
+        reference.get("schema_id") != T101_TERMINAL_MANIFEST_SCHEMA
+        or isinstance(reference.get("size_bytes"), bool)
+        or not isinstance(reference.get("size_bytes"), int)
+        or reference["size_bytes"] != path.stat().st_size
+        or not isinstance(reference.get("sha256"), str)
+        or _sha256(path) != reference["sha256"]
+    ):
+        raise T108IncompleteError(
+            "T106-bound T101 terminal manifest hash or schema reference mismatch"
+        )
+    document = _read_json(path, "T101 terminal retention manifest")
+    if document.get("schema_id") != T101_TERMINAL_MANIFEST_SCHEMA:
+        raise T108IncompleteError("T101 terminal retention manifest schema mismatch")
+    return path
+
+
 def _source_inputs_from_t106_provenance(
     producer_provenance: dict[str, Any],
 ) -> dict[str, Path]:
@@ -223,6 +246,7 @@ def _source_inputs_from_t106_provenance(
     accepted_t103 = producer_provenance.get("accepted_t103")
     if not isinstance(t101_artifacts, dict) or not isinstance(accepted_t103, dict):
         raise T108IncompleteError("T106 transitive T101/T103 bindings are unavailable")
+    t101_retention_manifest = _t101_terminal_manifest_from_historical(historical)
     t103_manifest = accepted_t103.get("manifest")
     t103_references = (
         t103_manifest.get("artifact_references")
@@ -260,10 +284,7 @@ def _source_inputs_from_t106_provenance(
         t101_artifacts.get("t085_canonical_c"), "T085 C pool"
     )
     resolved = {
-        "t101_retention_manifest": _path_from_retained_reference(
-            t101_artifacts.get("t101_terminal_retention_manifest"),
-            "T101 terminal retention manifest",
-        ),
+        "t101_retention_manifest": t101_retention_manifest,
         "t103_retention_manifest": t103_manifest_path,
         "t103_execution_record": t103_execution_path,
         "t087_formal": _path_from_retained_reference(

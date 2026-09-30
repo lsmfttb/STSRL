@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,6 +34,79 @@ def _mock_git_state(
         raise AssertionError(f"unexpected git command: {command}")
 
     monkeypatch.setattr(command.subprocess, "run", run)
+
+
+def _write_fixture(path: Path, content: bytes) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return path
+
+
+def _path_reference(path: Path) -> dict[str, str]:
+    return {"path": str(path)}
+
+
+def _source_provenance_fixture(tmp_path: Path) -> tuple[dict[str, object], Path]:
+    root = tmp_path / "accepted-inputs"
+    t101_path = _write_fixture(
+        root / "t101-terminal-retention-manifest.json",
+        b'{"schema_id":"t101-terminal-retention-manifest-v1"}\n',
+    )
+    t101_reference = {
+        "path": str(t101_path),
+        "schema_id": "t101-terminal-retention-manifest-v1",
+        "sha256": command._sha256(t101_path),
+        "size_bytes": t101_path.stat().st_size,
+    }
+
+    t103_root = root / "t103"
+    t103_candidate_path = _write_fixture(
+        t103_root / "candidate-diagnostics.json", b"[]\n"
+    )
+    t103_manifest_path = _write_fixture(
+        t103_root / "t103-retention-manifest.json", b'{"schema_id":"fixture"}\n'
+    )
+    t103_execution_path = _write_fixture(
+        t103_root / "t103-execution-record.json", b'{"task_id":"T103"}\n'
+    )
+
+    t085_root = root / "t085"
+    source_artifacts = {}
+    for name in (
+        "t085_canonical_a",
+        "t085_canonical_b",
+        "t085_canonical_c",
+        "t085_selection",
+        "t085_restore",
+        "t087_formal",
+        "t087_report",
+        "t087_retention",
+    ):
+        filename = f"{name}.json"
+        path = _write_fixture(t085_root / filename, b"{}\n")
+        source_artifacts[name] = _path_reference(path)
+    _write_fixture(t085_root / "cohort-b-source-manifest.json", b"{}\n")
+    _write_fixture(t085_root / "cohort-c-source-manifest.json", b"{}\n")
+
+    provenance: dict[str, object] = {
+        "historical_t101_bindings": {
+            "t101_terminal_retention_manifest": t101_reference,
+            "accepted_t101_source_artifacts": source_artifacts,
+        },
+        "accepted_t103": {
+            "manifest": {
+                "artifact_references": {
+                    "candidate_diagnostics": {"path": str(t103_candidate_path)}
+                }
+            },
+            "manifest_sha256": command._sha256(t103_manifest_path),
+            "execution_reference": {
+                "path": str(t103_execution_path),
+                "sha256": command._sha256(t103_execution_path),
+            },
+        },
+    }
+    return provenance, t101_path
 
 
 def test_t106_report_gate_requires_accepted_full_terminal() -> None:
@@ -81,6 +155,35 @@ def test_replay_requires_an_explicit_resource_status_path() -> None:
 
     with pytest.raises(T108IncompleteError, match="resource_status_path"):
         command._require_replay_arguments(args)
+
+
+def test_t101_terminal_manifest_resolves_from_historical_sibling_fail_closed(
+    tmp_path: Path,
+) -> None:
+    provenance, expected_path = _source_provenance_fixture(tmp_path)
+    historical = provenance["historical_t101_bindings"]
+    assert isinstance(historical, dict)
+    source_artifacts = historical["accepted_t101_source_artifacts"]
+    assert isinstance(source_artifacts, dict)
+    assert "t101_terminal_retention_manifest" not in source_artifacts
+
+    resolved = command._source_inputs_from_t106_provenance(provenance)
+    assert resolved["t101_retention_manifest"] == expected_path
+
+    missing_sibling = deepcopy(provenance)
+    missing_historical = missing_sibling["historical_t101_bindings"]
+    missing_artifacts = missing_historical["accepted_t101_source_artifacts"]
+    missing_artifacts["t101_terminal_retention_manifest"] = missing_historical.pop(
+        "t101_terminal_retention_manifest"
+    )
+    with pytest.raises(T108IncompleteError, match="T101 terminal retention manifest"):
+        command._source_inputs_from_t106_provenance(missing_sibling)
+
+    wrong_reference = deepcopy(provenance)
+    wrong_historical = wrong_reference["historical_t101_bindings"]
+    wrong_historical["t101_terminal_retention_manifest"]["sha256"] = "0" * 64
+    with pytest.raises(T108IncompleteError, match="hash or schema reference mismatch"):
+        command._source_inputs_from_t106_provenance(wrong_reference)
 
 
 def test_retention_manifest_binds_t108_rows_report_execution_and_provenance(

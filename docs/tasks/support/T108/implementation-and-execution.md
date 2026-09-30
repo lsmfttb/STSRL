@@ -1,7 +1,8 @@
 # T108 implementation and execution handoff
 
 This file describes the implemented workflow and the later readiness boundary.
-It is not T108 replay evidence. No T108 simulator replay has been run.
+It is not T108 replay evidence. No accepted T108 scientific census has been
+produced; this implementation-repair turn ran no simulator job.
 
 ## Read-only input qualification
 
@@ -40,6 +41,22 @@ manifest `27141e5d6167da7c0fe5c62b8c6c673c5a02f5187bd9c8ae866dfd1443998647`.
 The current native source pin qualified as
 `1458522294d967e8985e1fd52cc15d7ebe7f2acd`. The command reported
 `simulator_started: false`; it created no T108 scientific rows or terminal.
+
+## Preserved preflight attempts
+
+The existing `canary-attempt-1` and `canary-attempt-2` status and log files are
+preserved under
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t108-root-occurrence-mapping-subreason-diagnostic-41a789a/jobs/`.
+Both recorded exit code 2 with terminal `INCOMPLETE`; attempt 1 logged a
+`CalledProcessError`, while attempt 2 logged `T108IncompleteError`. Independent
+preflight review found that attempt 2 stopped before simulator execution and
+produced no T108 candidate rows, report, or retention manifest: the resolver
+looked for `t101_terminal_retention_manifest` inside
+`accepted_t101_source_artifacts`, although accepted T106 provenance stores it
+as a sibling in `historical_t101_bindings`. The resolver now validates and
+consumes that sibling reference. These failed attempts remain non-authoritative
+and must not be overwritten or combined; this repair does not authorize a new
+canary.
 
 For replay, T101, T103, T085, and T087 paths are resolved from the accepted
 T106 retention manifest's transitive producer bindings. Existing T101/T103/
