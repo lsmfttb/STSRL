@@ -359,7 +359,84 @@ def test_malformed_parent_trace_is_incomplete_and_parent_contradiction_is_distin
     assert returned["baseline_contradiction"] is True
     assert returned["parent_first_failed_stage"] == "root_occurrence_mapping"
     assert returned["parent_failure_code"] == "root_occurrence_mapping_failed"
+    assert returned["contradictory_mapping_diagnostics_role"] == (
+        "validated_t107_trace_only_not_classification"
+    )
+    assert returned["contradictory_mapping_diagnostics"] == [
+        {
+            "particle_index": 0,
+            "schema_id": DIAGNOSTIC_SCHEMA,
+            "status": "failed",
+            "mapping_subreason": "no_public_legal_action_surface",
+            "diagnostic_safe_metadata": {
+                "public_legal_occurrence_count": 0,
+                "search_root_edge_count": 1,
+                "public_occurrences_mapped": 0,
+                "search_root_edges_covered": 0,
+                "direct_mapping_count": 0,
+                "mechanical_duplicate_mapping_count": 0,
+            },
+        }
+    ]
     assert returned["subreason_class"] is None
+    assert returned["classification_source"] is None
+
+    completed_stages = {stage: "completed" for stage in _stages(failed=False)}
+    completed_diagnostic = {
+        "schema_id": DIAGNOSTIC_SCHEMA,
+        "status": "completed",
+        "mapping_subreason": "mapping_completed",
+        "public_legal_occurrence_count": 1,
+        "search_root_edge_count": 1,
+        "public_occurrences_mapped": 1,
+        "search_root_edges_covered": 1,
+        "direct_mapping_count": 1,
+        "mechanical_duplicate_mapping_count": 0,
+    }
+    completed_trace = {
+        "schema_id": TRACE_SCHEMA,
+        "attempt_status": "accepted",
+        "first_failed_stage": None,
+        "failure_code": None,
+        "accepted_root_report_returned": True,
+        "particles": [
+            {
+                "particle_index": index,
+                "stages": completed_stages,
+                "first_failed_stage": None,
+                "failure_code": None,
+                "root_occurrence_mapping_diagnostic": completed_diagnostic,
+            }
+            for index in range(2)
+        ],
+    }
+    accepted_bridge = classify_mapping_replay(
+        accepted=accepted,
+        bridge_outcome="returned",
+        bridge_call_parameters=call,
+        raw_trace=completed_trace,
+    )
+    assert accepted_bridge["baseline_contradiction"] is True
+    assert accepted_bridge["accepted_root_report_returned"] is True
+    assert accepted_bridge["contradictory_mapping_diagnostics"] == [
+        {
+            "particle_index": index,
+            "schema_id": DIAGNOSTIC_SCHEMA,
+            "status": "completed",
+            "mapping_subreason": "mapping_completed",
+            "diagnostic_safe_metadata": {
+                "public_legal_occurrence_count": 1,
+                "search_root_edge_count": 1,
+                "public_occurrences_mapped": 1,
+                "search_root_edges_covered": 1,
+                "direct_mapping_count": 1,
+                "mechanical_duplicate_mapping_count": 0,
+            },
+        }
+        for index in range(2)
+    ]
+    assert accepted_bridge["subreason_class"] is None
+    assert accepted_bridge["classification_source"] is None
 
     malformed = _native_trace(_mapping_diagnostic("no_public_legal_action_surface"))
     malformed["private_payload"] = "must not be retained"

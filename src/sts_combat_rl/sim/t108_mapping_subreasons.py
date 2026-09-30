@@ -83,6 +83,14 @@ def ordered_identity_digest(rows: Sequence[Mapping[str, Any]]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _diagnostic_safe_metadata(validated: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in validated.items()
+        if key not in {"schema_id", "status", "mapping_subreason"}
+    }
+
+
 def _validate_parent_mapping_baseline(row: Mapping[str, Any]) -> None:
     identity = row.get("selection_identity")
     if not isinstance(identity, str) or not identity:
@@ -290,6 +298,8 @@ def classify_mapping_replay(
         "mapping_subreason": None,
         "diagnostic_safe_metadata": None,
         "diagnostic_safe_metadata_role": None,
+        "contradictory_mapping_diagnostics": None,
+        "contradictory_mapping_diagnostics_role": None,
         "subreason_class": None,
         "classification_source": None,
         "baseline_contradiction": False,
@@ -332,7 +342,7 @@ def classify_mapping_replay(
     )
     if first_failed is not None:
         row["first_failing_particle_index"] = first_failed["particle_index"]
-    if (
+    baseline_reproduced = not (
         bridge_outcome != "exception"
         or parent_trace["attempt_status"] != "failed_closed"
         or parent_trace["first_failed_stage"] != "root_occurrence_mapping"
@@ -343,55 +353,63 @@ def classify_mapping_replay(
         or first_failed["first_failed_stage"] != "root_occurrence_mapping"
         or first_failed["failure_code"] != "root_occurrence_mapping_failed"
         or first_failed["stages"]["root_occurrence_mapping"] != "failed"
-    ):
-        row["baseline_contradiction"] = True
-        return row
+    )
 
     raw_particles = _mapping(raw_trace, "native stage trace")["particles"]
-    first_particle = next(
-        particle
-        for particle in raw_particles
-        if particle.get("particle_index") == first_failed["particle_index"]
-    )
-    diagnostic = first_particle.get("root_occurrence_mapping_diagnostic")
-    try:
-        validated = validate_t107_mapping_diagnostic(
-            diagnostic,
-            mapping_stage_status=first_failed["stages"]["root_occurrence_mapping"],
-        )
-        if validated is None or validated.get("status") != "failed":
-            raise ValueError("failed parent mapping lacks failed diagnostic")
-    except (ValueError, TypeError, KeyError):
-        row["mapping_telemetry_contract_violation"] = True
-        return row
-
-    # Validate additive diagnostics on every particle before retaining the trace.
+    validated_diagnostics: list[tuple[Mapping[str, Any], Mapping[str, Any] | None]] = []
     try:
         for raw_particle, parent_particle in zip(raw_particles, particles, strict=True):
-            validate_t107_mapping_diagnostic(
+            validated_diagnostic = validate_t107_mapping_diagnostic(
                 raw_particle.get("root_occurrence_mapping_diagnostic"),
                 mapping_stage_status=parent_particle["stages"][
                     "root_occurrence_mapping"
                 ],
             )
+            validated_diagnostics.append((parent_particle, validated_diagnostic))
     except (ValueError, TypeError, KeyError):
         row["mapping_telemetry_contract_violation"] = True
+
+    if not baseline_reproduced:
+        row["baseline_contradiction"] = True
+        if not row["mapping_telemetry_contract_violation"]:
+            row["contradictory_mapping_diagnostics"] = [
+                {
+                    "particle_index": parent_particle["particle_index"],
+                    "schema_id": validated["schema_id"],
+                    "status": validated["status"],
+                    "mapping_subreason": validated["mapping_subreason"],
+                    "diagnostic_safe_metadata": _diagnostic_safe_metadata(validated),
+                }
+                for parent_particle, validated in validated_diagnostics
+                if validated is not None
+            ]
+            row["contradictory_mapping_diagnostics_role"] = (
+                "validated_t107_trace_only_not_classification"
+            )
+        return row
+    if row["mapping_telemetry_contract_violation"]:
         return row
 
+    validated = next(
+        (
+            diagnostic
+            for parent_particle, diagnostic in validated_diagnostics
+            if parent_particle["particle_index"] == first_failed["particle_index"]
+        ),
+        None,
+    )
+    if validated is None or validated.get("status") != "failed":
+        row["mapping_telemetry_contract_violation"] = True
+        return row
     subreason = validated["mapping_subreason"]
     if subreason not in FAILURE_SUBREASONS:
         row["mapping_telemetry_contract_violation"] = True
         return row
-    safe_metadata = {
-        key: value
-        for key, value in validated.items()
-        if key not in {"schema_id", "status", "mapping_subreason"}
-    }
     row.update(
         mapping_diagnostic_schema_id=validated["schema_id"],
         mapping_diagnostic_status=validated["status"],
         mapping_subreason=subreason,
-        diagnostic_safe_metadata=safe_metadata,
+        diagnostic_safe_metadata=_diagnostic_safe_metadata(validated),
         diagnostic_safe_metadata_role="diagnostic_only",
         subreason_class=subreason,
         classification_source="structured_native_mapping_diagnostic",
