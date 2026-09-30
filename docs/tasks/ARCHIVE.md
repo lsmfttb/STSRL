@@ -130,8 +130,9 @@ discoverable from the archive:
   [reproducibility amendment](T087-reproducibility-amendment.md),
   [terminal monster-resolution semantics amendment](T087-terminal-monster-resolution-semantics-amendment.md),
   and [terminal monster telemetry amendment](T087-terminal-monster-telemetry-amendment.md).
-- T102: [resume-operation identity amendment](T102-resume-operation-identity-amendment.md)
-  and [metadata-current routing amendment](T102-route-binding-amendment.md).
+- T102: [resume-operation identity amendment](T102-resume-operation-identity-amendment.md),
+  [metadata-current routing amendment](T102-route-binding-amendment.md),
+  and [Planner review-reminder and workflow-continuation recovery amendment](T102-planner-response-reminder-amendment.md).
 
 T086 has no published task contract in this repository; the numbering gap is
 intentional historical provenance, not a missing link to invent.
