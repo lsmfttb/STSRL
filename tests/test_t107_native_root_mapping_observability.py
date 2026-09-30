@@ -69,19 +69,28 @@ class _BoundedBattleSetup:
 
 
 def test_smoke_bridge_requires_active_player_battle_and_obeys_action_bound() -> None:
-    ready = _BoundedBattleSetup(battle_after=2)
+    assert MAX_BATTLE_ENTRY_ACTIONS == 32
+
+    ready = _BoundedBattleSetup(battle_after=MAX_BATTLE_ENTRY_ACTIONS)
     result = _bridge_call_in_active_battle(
         ready, ready.bridge, max_actions=MAX_BATTLE_ENTRY_ACTIONS
     )
     assert result == {"accepted": True}
-    assert ready.step_count == 2
+    assert ready.step_count == MAX_BATTLE_ENTRY_ACTIONS
     assert ready.bridge_calls == 1
 
-    never_ready = _BoundedBattleSetup(battle_after=None)
-    with pytest.raises(SystemExit, match="within 2 legal-action steps"):
-        _bridge_call_in_active_battle(never_ready, never_ready.bridge, max_actions=2)
-    assert never_ready.step_count == 2
-    assert never_ready.bridge_calls == 0
+    one_step_too_late = _BoundedBattleSetup(battle_after=MAX_BATTLE_ENTRY_ACTIONS)
+    with pytest.raises(
+        SystemExit,
+        match=f"within {MAX_BATTLE_ENTRY_ACTIONS - 1} legal-action steps",
+    ):
+        _bridge_call_in_active_battle(
+            one_step_too_late,
+            one_step_too_late.bridge,
+            max_actions=MAX_BATTLE_ENTRY_ACTIONS - 1,
+        )
+    assert one_step_too_late.step_count == MAX_BATTLE_ENTRY_ACTIONS - 1
+    assert one_step_too_late.bridge_calls == 0
 
 
 def _diagnostic(

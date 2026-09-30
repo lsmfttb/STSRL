@@ -20,7 +20,7 @@ from sts_combat_rl.sim.t107_native_root_mapping_observability import (
     validate_t107_mapping_audit,
 )
 
-MAX_BATTLE_ENTRY_ACTIONS = 200
+MAX_BATTLE_ENTRY_ACTIONS = 32
 
 
 def _rejects_injection(call, label: str) -> None:
