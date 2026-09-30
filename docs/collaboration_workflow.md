@@ -62,9 +62,10 @@ regime, promotion criteria, or successor science.
 ### Planner Review Routing, Polling, And Resume
 
 For the capability-grounded Planner routing protocol, the
-[`T102 Phase-B contract`](tasks/T102-agent-planner-notification-protocol.md)
-and its same-ID [`resume-identity amendment`](tasks/T102-resume-operation-identity-amendment.md)
-and [`metadata-current routing amendment`](tasks/T102-route-binding-amendment.md)
+[`T102 Phase-B contract`](tasks/T102-agent-planner-notification-protocol.md),
+its same-ID [`resume-identity amendment`](tasks/T102-resume-operation-identity-amendment.md),
+[`metadata-current routing amendment`](tasks/T102-route-binding-amendment.md),
+and [`review-reminder and workflow-continuation recovery amendment`](tasks/T102-planner-response-reminder-amendment.md)
 are the normative mechanics package. The routing amendment supersedes the
 primary contract's assertion/generation/binding-based route-selection and
 route-related canary prose; all non-routing T102 semantics remain unchanged.
@@ -91,21 +92,60 @@ only; it cannot approve a specification, authorize work, accept a result, or
 authorize landing. Planner decisions and their exact-head/request correlation
 must be durable on the PR before Maintainer action.
 
-After delivery, the Maintainer remains in the same active turn and uses a
-task-specific bounded sleep/poll loop to reread PR head and comments. There is
-no repository-wide polling interval or wait-budget default. A stale exact-head
-request stops for re-review. Each distinct later notification independently
-resolves the current thread from list metadata; do not retain a route binding.
-Do not turn an ordinary Planner wait into a detached-job heartbeat.
+After delivery, Maintainer remains in the same active turn and derives one of
+two distinct waiting stages from durable PR evidence:
+
+- `WAITING_FOR_PLANNER_DECISION` while the durable request has no matching
+  Planner decision; and
+- `WAITING_FOR_PLANNER_CONTINUATION` only after a matching decision declares
+  `continuation_owner: PLANNER` and terminal-evidence preflight reports no
+  relevant completion/blocker record.
+
+The recovery amendment supplies bounded wake-up reminders for both stages. The
+default first reminder threshold is 10 minutes unless the request records a
+longer expectation; reminders are at least 10 minutes apart and capped at two
+per waiting stage per active Maintainer turn. Every reminder reruns
+metadata-current routing, reuses the original durable notification identity,
+and has `authority: reminder_only`. A reminder never creates approval,
+acceptance, implementation, merge, or scientific authority. Do not turn an
+ordinary Planner wait into a detached-job heartbeat.
+
+For a Planner-owned continuation, Maintainer must run the amendment's complete
+terminal-evidence preflight before either accepting a terminal transition or
+remaining in continuation wait. Relevant terminal candidates are correlated to
+the current notification and Planner-decision identity, then validated against
+the full exact-head/action identity. Exactly one valid completion or blocker may
+terminate waiting. Malformed relevant evidence, completion-plus-blocker,
+duplicate/multiple terminal records, or contradictory correlation fails closed
+and suppresses reminders. Only zero relevant terminal candidates permits
+ordinary continuation waiting. Unrelated terminal records for another request or
+decision do not terminate the current continuation.
+
+A durable Planner decision is therefore not automatically the end of the
+Planner-owned workflow. Every T102-triggered Planner decision records
+`continuation_owner` plus stable continuation action identity. If ownership is
+`MAINTAINER` or `NONE`, Planner waiting ends. If ownership is `PLANNER`, Planner
+must continue the named action until durable completion or a durable
+`PLANNER_CONTINUATION_BLOCKED` handoff is recorded, and Maintainer must not treat
+the decision comment alone as completion.
+
+In particular, when Maintainer final acceptance already exists on the same exact
+head and Planner records final scientific/architecture `PASS` with no
+intervening-role requirement, the immediate continuation is Planner-owned
+`MERGE_PR`. Planner must continue in the same workflow through pre-landing
+head/base/main/mergeability checks, exact-expected-head merge, post-merge `main`
+verification, and durable continuation completion. If those conditions no longer
+hold, Planner records a durable continuation blocker instead of silently
+stopping or merging unsafely.
 
 Automatic follow-up is allowed only when the action has a stable operation
 identity and completion is idempotent or durably observable before retry. Check
 the completion predicate before performing or retrying the action, and record a
 completed response ACK only after durable completion evidence exists. This is
 not exactly-once transport or restart-safe Maintainer recovery. If routing,
-correlation, completion evidence, or the active turn is unavailable, fail closed
-and use explicit/manual recovery; never infer that a chat send or an ACK proves
-an unobserved action completed.
+correlation, completion evidence, terminal-evidence classification, or the active
+turn is unavailable, fail closed and use explicit/manual recovery; never infer
+that a chat send or an ACK proves an unobserved action completed.
 
 ### Task Implementer
 
@@ -341,6 +381,13 @@ change to that head after either final acceptance invalidates that acceptance fo
 the new head. A clearly non-semantic landing-only change may retain acceptance
 only when both roles explicitly record that it is immaterial. Prefer putting
 landing records on the PR before dual final acceptance so this exception is rare.
+
+After a final Planner decision, apply the T102 continuation fields rather than
+assuming the decision comment itself ends the turn. A final `PASS` that leaves
+Planner-owned `MERGE_PR` must proceed immediately to the pre-landing checks and
+verified landing completion described above, or to a durable continuation
+blocker. Maintainer waiting ends only when durable evidence resolves the declared
+continuation owner/action.
 
 ## Main Synchronization Gate
 
