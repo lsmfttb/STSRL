@@ -45,7 +45,10 @@ def _is_valid(record: dict[str, object]) -> bool:
             return False
 
     if record.get("kind") == "completion":
-        return bool(record.get("completion_evidence")) and record.get("status") == "COMPLETED"
+        return (
+            bool(record.get("completion_evidence"))
+            and record.get("status") == "COMPLETED"
+        )
     if record.get("kind") == "blocker":
         return (
             record.get("status") == "BLOCKED"
@@ -117,10 +120,11 @@ def test_malformed_relevant_terminal_evidence_fails_closed_without_reminder() ->
 
 
 def test_completion_plus_blocker_fails_closed_before_either_terminal_branch() -> None:
+    records = [terminal_record("completion"), terminal_record("blocker")]
     assert poll_state(
         decision_present=True,
         continuation_owner="PLANNER",
-        terminal_records=[terminal_record("completion"), terminal_record("blocker")],
+        terminal_records=records,
     ) == ("TERMINAL_EVIDENCE_INVALID", False)
 
 
