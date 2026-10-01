@@ -39,6 +39,7 @@ def _v2_report():
         root_action_mapping_schema="native-search-root-occurrence-equivalence-v2",
         root_row_count=5,
         unsearched_legal_action_count=2,
+        model_calls=None,
     )
     for holder in (particle, root):
         holder["root_action_mapping_completion_semantics"] = (

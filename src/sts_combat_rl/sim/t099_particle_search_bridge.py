@@ -547,10 +547,15 @@ def _validate_root_evaluation(
         for key in (
             "root_visits",
             "native_simulator_steps",
-            "model_calls",
             "simulations_requested",
         ):
             _nonnegative_int(root[key], key)
+        # The legacy aggregate report deliberately leaves this field absent in
+        # value; the complete typed work counter below is authoritative.
+        if root["model_calls"] is not None:
+            raise T099ParticleSearchBridgeError(
+                "v2 aggregate model_calls must remain null"
+            )
         for key in ("best_action_value", "min_action_value", "outcome_player_hp"):
             if (
                 isinstance(root[key], bool)
