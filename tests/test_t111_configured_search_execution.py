@@ -307,11 +307,13 @@ def _authorization_fixture(tmp_path: Path, monkeypatch):
     qualification_path = artifact_root / "qualification.json"
     preparation_path = artifact_root / "preparation.json"
     resource_status_path = artifact_root / "status.json"
+    python_runtime = execution_cli.preparation._python_runtime_fingerprint()
     qualification = {
         "schema_id": execution_cli.T111_PREP_QUALIFICATION_SCHEMA,
         "eligible": True,
         "candidate_execution_started": False,
         "implementation_head": head,
+        "python_runtime": python_runtime,
         "native_identity": _NATIVE,
         "retained_artifacts": {
             name: {} for name in execution_cli._EXPECTED_INPUT_ROLES
@@ -327,12 +329,14 @@ def _authorization_fixture(tmp_path: Path, monkeypatch):
         "candidate_execution_authorized": False,
         "candidate_execution_started": False,
         "implementation_head": head,
+        "python_runtime": python_runtime,
         "input_qualification_sha256": qualification_ref["sha256"],
     }
     preparation_ref = _write_json_reference(
         preparation_path, readiness, execution_cli.T111_PREPARATION_SCHEMA
     )
-    binary_path = artifact_root / "native.so"
+    extension_suffix = str(python_runtime["extension_suffix"])
+    binary_path = artifact_root / f"native{extension_suffix}"
     binary_path.write_bytes(b"exact native binary fixture")
     resource_root = artifact_root / "leases"
     resource_root.mkdir()
@@ -368,12 +372,14 @@ def _authorization_fixture(tmp_path: Path, monkeypatch):
         "implementation_worktree_path": str(repo_root.resolve()),
         "implementation_head": head,
         "approved_spec_commit": "f8ceef6f68bab587f7696d9230fbffd7416b19b2",
+        "python_runtime": python_runtime,
         "qualification_artifact": qualification_ref,
         "preparation_artifact": preparation_ref,
         "native_identity": _NATIVE,
         "native_binary": {
             "path": str(binary_path),
             "sha256": hashlib.sha256(binary_path.read_bytes()).hexdigest(),
+            "size_bytes": binary_path.stat().st_size,
         },
         "resource_plan": resource_plan,
     }
@@ -428,6 +434,39 @@ def test_t111_authorization_binds_external_artifacts_to_exact_worktree(
 
     with pytest.raises(execution_cli.T111ExecutionAuthorizationError):
         execution_cli.validate_t111_execution_authorization(authorization, **kwargs)
+
+
+def test_t111_authorization_rejects_python_runtime_mismatch(tmp_path, monkeypatch):
+    authorization, kwargs = _authorization_fixture(tmp_path, monkeypatch)
+    authorization["python_runtime"] = {
+        **authorization["python_runtime"],
+        "minor": authorization["python_runtime"]["minor"] + 1,
+    }
+
+    with pytest.raises(execution_cli.T111ExecutionAuthorizationError):
+        execution_cli.validate_t111_execution_authorization(authorization, **kwargs)
+
+
+def test_t111_authorization_rejects_native_extension_with_wrong_abi(
+    tmp_path, monkeypatch
+):
+    authorization, kwargs = _authorization_fixture(tmp_path, monkeypatch)
+    binary_path = Path(str(authorization["native_binary"]["path"]))
+    wrong_path = binary_path.with_name("native.cpython-0-unrelated.so")
+    wrong_path.write_bytes(binary_path.read_bytes())
+    authorization["native_binary"] = {
+        "path": str(wrong_path),
+        "sha256": hashlib.sha256(wrong_path.read_bytes()).hexdigest(),
+        "size_bytes": wrong_path.stat().st_size,
+    }
+
+    with pytest.raises(execution_cli.T111ExecutionAuthorizationError):
+        execution_cli.validate_t111_execution_authorization(authorization, **kwargs)
+
+    with pytest.raises(execution_cli.T111ExecutionAuthorizationError):
+        execution_cli._load_native_module(
+            wrong_path, str(authorization["native_binary"]["sha256"])
+        )
 
 
 @pytest.mark.parametrize(

@@ -10,8 +10,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import platform
+import re
 import subprocess
 import sys
+import sysconfig
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -77,27 +80,153 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _windows_gitdir_pointer(cwd: Path) -> bool:
+    """Return true only for a Windows absolute gitdir in a worktree .git file."""
+
+    for directory in (cwd, *cwd.parents):
+        marker = directory / ".git"
+        try:
+            if not marker.is_file():
+                continue
+            content = marker.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            continue
+        match = re.fullmatch(r"gitdir:\s*([A-Za-z]:[/\\].+)", content)
+        if match is not None:
+            return True
+    return False
+
+
+def _wsl_windows_path(path: Path) -> str:
+    result = subprocess.run(
+        ["wslpath", "-w", str(path)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    converted = result.stdout.strip()
+    if not re.fullmatch(r"[A-Za-z]:\\.+", converted):
+        raise T111QualificationError("wslpath did not return an absolute Windows path")
+    return converted
+
+
+def _wsl_posix_path(path: str) -> Path:
+    result = subprocess.run(
+        ["wslpath", "-u", path],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    converted = result.stdout.strip()
+    if not converted.startswith("/"):
+        raise T111QualificationError("wslpath did not return an absolute POSIX path")
+    return Path(converted)
+
+
+def _git_output(path: Path, *arguments: str, text: bool = True) -> str | bytes:
+    """Run Git normally; use Windows Git only for a proven WSL worktree pointer.
+
+    The fallback never masks an ordinary Git failure. It is enabled only on a
+    POSIX runtime when an ancestor contains a `.git` file with a Windows
+    absolute gitdir path, as produced by a Windows-managed linked worktree.
+    """
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), *arguments],
+            check=True,
+            capture_output=True,
+            text=text,
+            timeout=30 if arguments and arguments[0] == "show" else 10,
+        )
+        return result.stdout
+    except (OSError, subprocess.SubprocessError):
+        if sys.platform == "win32" or not _windows_gitdir_pointer(path):
+            raise
+        try:
+            windows_path = _wsl_windows_path(path)
+            result = subprocess.run(
+                ["git.exe", "-C", windows_path, *arguments],
+                check=True,
+                capture_output=True,
+                text=text,
+                timeout=30 if arguments and arguments[0] == "show" else 10,
+            )
+            return result.stdout
+        except (
+            OSError,
+            subprocess.SubprocessError,
+            T111QualificationError,
+        ) as fallback_error:
+            raise T111QualificationError(
+                "POSIX Git failed and the Windows-managed worktree fallback failed"
+            ) from fallback_error
+
+
 def _git_repository_root(path: Path) -> Path:
     """Resolve and validate the Git root containing a retained input path."""
 
     try:
         resolved = path.resolve(strict=True)
         cwd = resolved if resolved.is_dir() else resolved.parent
-        result = subprocess.run(
-            ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        root = Path(result.stdout.strip()).resolve(strict=True)
-    except (OSError, subprocess.SubprocessError) as exc:
+        root_value = _git_output(cwd, "rev-parse", "--show-toplevel")
+        assert isinstance(root_value, str)
+        root_text = root_value.strip()
+        if sys.platform != "win32" and re.match(r"^[A-Za-z]:[/\\]", root_text):
+            root = _wsl_posix_path(root_text).resolve(strict=True)
+        else:
+            root = Path(root_text).resolve(strict=True)
+    except (OSError, subprocess.SubprocessError, T111QualificationError) as exc:
         raise T111QualificationError(
             "cannot resolve retained-input Git repository root"
         ) from exc
     if not root.is_dir():
         raise T111QualificationError("retained-input Git repository root is invalid")
     return root
+
+
+def _python_runtime_fingerprint() -> dict[str, object]:
+    """Identify the active interpreter and extension ABI without importing it."""
+
+    executable = Path(sys.executable).resolve()
+    return {
+        "implementation": platform.python_implementation(),
+        "version": platform.python_version(),
+        "major": sys.version_info.major,
+        "minor": sys.version_info.minor,
+        "soabi": sysconfig.get_config_var("SOABI"),
+        "extension_suffix": sysconfig.get_config_var("EXT_SUFFIX"),
+        "platform": sysconfig.get_platform(),
+        "executable": str(executable),
+    }
+
+
+def _validate_native_binary_abi_path(
+    binary_path: Path, runtime: Mapping[str, object]
+) -> Path:
+    """Fail closed unless a native extension filename matches this runtime ABI."""
+
+    if dict(runtime) != _python_runtime_fingerprint():
+        raise T111QualificationError("authorized Python runtime identity changed")
+    suffix = runtime.get("extension_suffix")
+    if (
+        runtime.get("implementation") != "CPython"
+        or not isinstance(suffix, str)
+        or not suffix
+        or not binary_path.name.endswith(suffix)
+    ):
+        raise T111QualificationError(
+            "native extension ABI suffix does not match the active CPython runtime"
+        )
+    try:
+        resolved = binary_path.resolve(strict=True)
+        if not resolved.is_file():
+            raise OSError("native extension path is not a regular file")
+    except OSError as exc:
+        raise T111QualificationError("native extension binary is unavailable") from exc
+    return resolved
 
 
 def _artifact_binding(
@@ -150,22 +279,19 @@ def _verify_historical_manifest_blob(
         or binding.get("schema_id") != "sts-lightspeed-source-manifest-v1"
     ):
         raise T111QualificationError("historical T101 manifest producer is unexpected")
-    command = [
-        "git",
-        "-C",
-        str(repo_root),
-        "show",
-        f"{producer_commit}:docs/sts_lightspeed_source_manifest.json",
-    ]
     try:
-        result = subprocess.run(
-            command, check=True, capture_output=True, text=False, timeout=30
+        blob = _git_output(
+            repo_root,
+            "show",
+            f"{producer_commit}:docs/sts_lightspeed_source_manifest.json",
+            text=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise T111QualificationError(
             "exact historical T101 manifest Git blob is unavailable"
         ) from exc
-    blob = result.stdout
+    if not isinstance(blob, bytes):
+        raise T111QualificationError("historical T101 manifest Git blob is not bytes")
     digest = hashlib.sha256(blob).hexdigest()
     if len(blob) != binding["size_bytes"] or digest != binding["sha256"]:
         raise T111QualificationError(
@@ -414,6 +540,7 @@ def prepare_t111_input_qualification_from_paths(
         "task_id": "T111",
         "implementation_head": started_head,
         "approved_spec_commit": T111_APPROVED_SPEC_COMMIT,
+        "python_runtime": _python_runtime_fingerprint(),
         "native_identity": None,
         "historical_t101_execution_identity": None,
         "historical_t101_artifacts": {},
@@ -650,6 +777,7 @@ def prepare_t111_input_qualification_from_paths(
         "candidate_execution_started": False,
         "implementation_head": implementation_head,
         "approved_spec_commit": T111_APPROVED_SPEC_COMMIT,
+        "python_runtime": evidence["python_runtime"],
         "input_qualification": qualification_ref,
         "input_qualification_sha256": qualification_ref["sha256"],
         "native_identity": evidence["native_identity"],

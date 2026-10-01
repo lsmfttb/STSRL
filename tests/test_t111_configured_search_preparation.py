@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from sts_combat_rl.commands import (
+    t111_configured_search_execution_cli as t111_execution,
+)
 from sts_combat_rl.commands import t111_configured_search_support as t111
 from sts_combat_rl.commands.t088_canary import T088CanaryPathError
 from sts_combat_rl.commands.t103_particle_diagnostic import T103PathError
@@ -45,6 +48,79 @@ def test_t111_repository_root_comes_from_git_at_manifest_parent(
     ]
 
 
+def test_t111_wsl_git_fallback_handles_windows_managed_worktree_pointer(
+    monkeypatch, tmp_path: Path
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".git").write_text(
+        "gitdir: D:/DeadlyCatCoding/STSRL/.git/worktrees/STSRL-T111\n",
+        encoding="utf-8",
+    )
+    manifest = repo_root / "artifacts" / "manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text("{}", encoding="utf-8")
+    windows_root = "D:\\DeadlyCatCoding\\STSRL-T111"
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[0] == "git":
+            raise t111.subprocess.CalledProcessError(128, command)
+        if command[:2] == ["wslpath", "-w"]:
+            return SimpleNamespace(stdout=f"{windows_root}\n")
+        if command[0] == "git.exe":
+            arguments = command[3:]
+            if arguments == ["rev-parse", "--show-toplevel"]:
+                return SimpleNamespace(stdout=f"{windows_root}\n")
+            if arguments == ["rev-parse", "HEAD"]:
+                return SimpleNamespace(stdout=f"{'a' * 40}\n")
+            if arguments == ["branch", "--show-current"]:
+                return SimpleNamespace(
+                    stdout="planner/t111-configured-search-domain-support-reentry\n"
+                )
+            if arguments == ["status", "--porcelain"]:
+                return SimpleNamespace(stdout="")
+        raise AssertionError(f"unexpected subprocess command: {command!r}")
+
+    monkeypatch.setattr(t111.sys, "platform", "linux")
+    monkeypatch.setattr(t111.subprocess, "run", fake_run)
+    monkeypatch.setattr(t111, "_wsl_posix_path", lambda _path: repo_root)
+
+    assert t111._git_repository_root(manifest) == repo_root.resolve()
+    assert t111_execution._git_state(repo_root) == (
+        "a" * 40,
+        "planner/t111-configured-search-domain-support-reentry",
+        False,
+    )
+    assert all(call[0] != "git.exe" or call[2] == windows_root for call in calls)
+    assert sum(call[0] == "git.exe" for call in calls) == 4
+
+
+def test_t111_runtime_fingerprint_and_native_abi_suffix_are_fail_closed(
+    tmp_path: Path,
+):
+    runtime = t111._python_runtime_fingerprint()
+    suffix = runtime["extension_suffix"]
+    assert runtime["implementation"] == "CPython"
+    assert isinstance(suffix, str) and suffix
+
+    matching = tmp_path / f"slaythespire{suffix}"
+    matching.write_bytes(b"binary fixture")
+    assert (
+        t111._validate_native_binary_abi_path(matching, runtime) == matching.resolve()
+    )
+
+    mismatch = tmp_path / "slaythespire.cpython-0-unrelated.so"
+    mismatch.write_bytes(b"binary fixture")
+    try:
+        t111._validate_native_binary_abi_path(mismatch, runtime)
+    except t111.T111QualificationError as exc:
+        assert "ABI suffix" in str(exc)
+    else:
+        raise AssertionError("incompatible native extension ABI was accepted")
+
+
 def test_t111_t101_terminal_gate_failure_writes_ineligible_artifact(
     monkeypatch, tmp_path: Path
 ):
@@ -63,6 +139,9 @@ def test_t111_t101_terminal_gate_failure_writes_ineligible_artifact(
     assert result["qualification"]["eligible"] is False
     assert result["qualification"]["terminal_classification"] == (
         "CONFIGURED_SEARCH_DOMAIN_INPUT_INELIGIBLE"
+    )
+    assert result["qualification"]["python_runtime"] == (
+        t111._python_runtime_fingerprint()
     )
     assert result["qualification"]["failure_type"] == "T103PathError"
     assert (tmp_path / "t111-input-qualification.json").is_file()

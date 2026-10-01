@@ -157,30 +157,21 @@ def _verify_artifact_reference(
 
 def _git_state(repo_root: Path) -> tuple[str, str, bool]:
     try:
-        head = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        ).stdout.strip()
-        branch = subprocess.run(
-            ["git", "-C", str(repo_root), "branch", "--show-current"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        ).stdout.strip()
-        dirty = bool(
-            subprocess.run(
-                ["git", "-C", str(repo_root), "status", "--porcelain"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            ).stdout
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
+        head_value = preparation._git_output(repo_root, "rev-parse", "HEAD")
+        branch_value = preparation._git_output(repo_root, "branch", "--show-current")
+        status_value = preparation._git_output(repo_root, "status", "--porcelain")
+        if not all(
+            isinstance(value, str) for value in (head_value, branch_value, status_value)
+        ):
+            raise T111ExecutionAuthorizationError("Git state output is not text")
+        head = head_value.strip()
+        branch = branch_value.strip()
+        dirty = bool(status_value)
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        preparation.T111QualificationError,
+    ) as exc:
         raise T111ExecutionAuthorizationError(
             "cannot verify exact local Git state"
         ) from exc
@@ -287,6 +278,7 @@ def validate_t111_execution_authorization(
         "implementation_worktree_path",
         "implementation_head",
         "approved_spec_commit",
+        "python_runtime",
         "qualification_artifact",
         "preparation_artifact",
         "native_identity",
@@ -326,6 +318,7 @@ def validate_t111_execution_authorization(
     )
     qualification = _read_json(qualification_path, label="T111 qualification")
     readiness = _read_json(preparation_path, label="T111 readiness preparation")
+    runtime = preparation._python_runtime_fingerprint()
     if (
         qualification.get("eligible") is not True
         or qualification.get("candidate_execution_started") is not False
@@ -334,6 +327,10 @@ def validate_t111_execution_authorization(
         or readiness.get("candidate_execution_started") is not False
         or readiness.get("implementation_head") != head
         or readiness.get("input_qualification_sha256") != qualification_ref["sha256"]
+        or not isinstance(qualification.get("python_runtime"), Mapping)
+        or dict(qualification["python_runtime"]) != runtime
+        or readiness.get("python_runtime") != runtime
+        or value.get("python_runtime") != runtime
         or not isinstance(qualification.get("retained_artifacts"), Mapping)
         or set(qualification["retained_artifacts"]) != _EXPECTED_INPUT_ROLES
     ):
@@ -355,12 +352,34 @@ def validate_t111_execution_authorization(
     binary = value.get("native_binary")
     if (
         not isinstance(binary, Mapping)
+        or set(binary) != {"path", "sha256", "size_bytes"}
         or not isinstance(binary.get("path"), str)
         or not isinstance(binary.get("sha256"), str)
         or len(binary["sha256"]) != 64
         or any(char not in "0123456789abcdef" for char in binary["sha256"])
+        or isinstance(binary.get("size_bytes"), bool)
+        or not isinstance(binary.get("size_bytes"), int)
+        or binary["size_bytes"] <= 0
     ):
         raise T111ExecutionAuthorizationError("native binary binding is malformed")
+    try:
+        binary_path = preparation._validate_native_binary_abi_path(
+            Path(str(binary["path"])), runtime
+        )
+        binary_digest = _sha256_file(binary_path)
+        binary_size = binary_path.stat().st_size
+    except (OSError, preparation.T111QualificationError) as exc:
+        raise T111ExecutionAuthorizationError(
+            "native binary is incompatible with the authorized Python ABI"
+        ) from exc
+    if (
+        str(binary_path) != binary["path"]
+        or binary_digest != binary["sha256"]
+        or binary_size != binary["size_bytes"]
+    ):
+        raise T111ExecutionAuthorizationError(
+            "native binary path/hash/size differs from Maintainer authorization"
+        )
     plan = _validate_resource_plan(
         value.get("resource_plan"), status_path=resource_status_path
     )
@@ -427,9 +446,11 @@ def _verify_active_resource_guard(
 
 def _load_native_module(binary_path: Path, expected_sha256: str) -> object:
     try:
-        resolved = binary_path.resolve(strict=True)
+        resolved = preparation._validate_native_binary_abi_path(
+            binary_path, preparation._python_runtime_fingerprint()
+        )
         digest = _sha256_file(resolved)
-    except OSError as exc:
+    except (OSError, preparation.T111QualificationError) as exc:
         raise T111ExecutionAuthorizationError(
             "authorized native binary is unavailable"
         ) from exc
@@ -879,6 +900,7 @@ def execute_t111_authorized_population(
             "candidate_execution_completed": True,
             "native_identity": validated["authorization"]["native_identity"],
             "native_binary": dict(binary),
+            "python_runtime": dict(validated["authorization"]["python_runtime"]),
             "historical_t101_identity": provenance["historical_t101_native_identity"],
             "input_provenance": provenance,
             "input_qualification_artifact": validated["qualification_artifact"],
