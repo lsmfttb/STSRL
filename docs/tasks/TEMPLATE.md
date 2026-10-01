@@ -37,6 +37,20 @@ scientific claim boundary, required predicates, and unavailable-fact behavior
 
 Define required behavior, ownership boundaries, and public interfaces.
 
+## Diagnostic Method Gate
+
+For debugging, failure-localization, root-cause, observability, or other diagnostic
+tasks, follow [`../diagnostic_method.md`](../diagnostic_method.md). Record the
+completed static production-code/data-flow/configuration/game-semantic analysis,
+the exact unresolved fact if any, existing retained evidence that must be reused,
+and the smallest dynamic witness that could distinguish the remaining mechanisms.
+Do not authorize new telemetry or a population-scale replay/census unless the
+contract states why existing evidence and the minimal witness cannot answer the
+question. After each new observation layer, return to source/data-flow analysis
+before escalating again.
+
+For non-diagnostic tasks, state `not applicable`.
+
 ## Out Of Scope
 
 List adjacent work that must not enter this branch.
