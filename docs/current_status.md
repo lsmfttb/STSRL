@@ -177,14 +177,21 @@ and [task archive](tasks/ARCHIVE.md) for exact provenance and retained evidence.
 Post-T106 Planner review, including an external architecture audit of
 `SnyderConsulting/sts_ml`, does not change the accepted T106 census. The external
 solver remains architecture evidence only, not accepted STSRL correctness,
-particle-convergence, or public-fidelity evidence. T107 has now accepted
-STSRL-008's exact-source root-occurrence mapping subreason observability
-capability as `NATIVE_ROOT_OCCURRENCE_MAPPING_OBSERVABILITY_ACCEPTED`; this is a
-source/capability result, not a replay or mechanics diagnosis. A separate
-Planner-published exact-323 mapping-subreason diagnostic re-entry is eligible
-but has not been authorized or executed. The 20 public-fidelity-stage failures
-remain a separate diagnosis lane. T107 authorizes no mapping repair, N>2
-convergence, training, promotion, T034 closure, or T063/T066 activation.
+particle-convergence, or public-fidelity evidence. T107 accepted STSRL-008's
+exact-source root-occurrence mapping subreason observability capability as
+`NATIVE_ROOT_OCCURRENCE_MAPPING_OBSERVABILITY_ACCEPTED`; this is a
+source/capability result, not a replay or mechanics diagnosis. T108 has now
+completed the exact 323-row T106 root-mapping re-entry under the frozen
+replicate-0, N=2, unguided Search-v2@400, no-potions configuration. All 323
+reproduced the accepted root-mapping-stage baseline and classified from valid
+structured native diagnostics as
+`missing_non_card_direct_search_root_match` (A/B/C 84/174/65); the other six
+accepted failure subreasons had count zero. This is a bounded native
+mapping-control-flow census, not a mechanics root-cause or repair result. The
+separate 20 public-fidelity-stage failures remain unresolved and reserved for
+their own diagnosis lane. No mapping repair, Part-A replay, N>2 convergence,
+training, controller promotion, T034 closure, or T063/T066 activation is
+authorized by T108.
 
 The retained closed-route conclusions remain available through the task archive
 and contracts, including the earlier Oracle-guided Search, later-act reach,
