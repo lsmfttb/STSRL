@@ -350,24 +350,29 @@ def _source_manifest_identity(
 def _t085_source_manifest_paths(
     restore_document: Mapping[str, object],
 ) -> tuple[Path, Path]:
-    source_artifacts = restore_document.get("source_artifacts")
-    if not isinstance(source_artifacts, Mapping):
+    try:
+        source_bindings = t088_canary._source_references(restore_document)
+    except T088CanaryPathError as exc:
         raise T111QualificationError(
-            "T085 restore evidence lacks source artifact bindings"
-        )
+            "T085 restore evidence lacks valid source bindings"
+        ) from exc
     paths: list[Path] = []
     for stratum in ("B", "C"):
-        cohort = source_artifacts.get(stratum)
-        reference = (
-            cohort.get("source_manifest") if isinstance(cohort, Mapping) else None
-        )
-        if not isinstance(reference, Mapping) or not isinstance(
-            reference.get("path"), str
-        ):
+        cohort = source_bindings.get(stratum)
+        if not isinstance(cohort, Mapping):
             raise T111QualificationError(
                 f"T085 {stratum} source-manifest binding is unavailable"
             )
-        paths.append(Path(reference["path"]))
+        try:
+            reference = t088_canary._artifact_reference(
+                cohort.get("source_manifest"),
+                f"T085 {stratum} source manifest",
+            )
+        except T088CanaryPathError as exc:
+            raise T111QualificationError(
+                f"T085 {stratum} source-manifest binding is unavailable"
+            ) from exc
+        paths.append(Path(str(reference["path"])))
     return paths[0], paths[1]
 
 

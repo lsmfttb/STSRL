@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from sts_combat_rl.commands import (
     t111_configured_search_execution_cli as t111_execution,
 )
@@ -14,6 +16,7 @@ from sts_combat_rl.commands.t103_particle_diagnostic import T103PathError
 from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     T085_RESTORE_SCHEMA_ID,
     T085_SELECTION_SCHEMA_ID,
+    T085_SOURCE_MANIFEST_SCHEMA_ID,
 )
 
 
@@ -119,6 +122,76 @@ def test_t111_runtime_fingerprint_and_native_abi_suffix_are_fail_closed(
         assert "ABI suffix" in str(exc)
     else:
         raise AssertionError("incompatible native extension ABI was accepted")
+
+
+def test_t111_restore_source_bindings_supply_b_and_c_manifest_paths():
+    restore_document = {
+        "schema_id": T085_RESTORE_SCHEMA_ID,
+        "source_bindings": {
+            "A": {
+                "map": {
+                    "path": "/retained/a-map.jsonl",
+                    "schema_id": "fixed-cohort-v3-jsonl",
+                    "sha256": "a" * 64,
+                    "byte_count": 10,
+                }
+            },
+            "B": {
+                "map": {
+                    "path": "/retained/b-map.jsonl",
+                    "schema_id": "assisted-source-pool-v1-jsonl",
+                    "sha256": "1" * 64,
+                    "byte_count": 11,
+                },
+                "source_manifest": {
+                    "path": "/retained/b-source-manifest.json",
+                    "schema_id": T085_SOURCE_MANIFEST_SCHEMA_ID,
+                    "sha256": "b" * 64,
+                    "byte_count": 12,
+                },
+            },
+            "C": {
+                "map": {
+                    "path": "/retained/c-map.jsonl",
+                    "schema_id": "natural-source-pool-v1-jsonl",
+                    "sha256": "2" * 64,
+                    "byte_count": 13,
+                },
+                "source_manifest": {
+                    "path": "/retained/c-source-manifest.json",
+                    "schema_id": T085_SOURCE_MANIFEST_SCHEMA_ID,
+                    "sha256": "c" * 64,
+                    "byte_count": 14,
+                },
+            },
+        },
+    }
+
+    assert t111._t085_source_manifest_paths(restore_document) == (
+        Path("/retained/b-source-manifest.json"),
+        Path("/retained/c-source-manifest.json"),
+    )
+
+
+@pytest.mark.parametrize(
+    "restore_document",
+    [
+        {"source_artifacts": {"A": {}, "B": {}, "C": {}}},
+        {"source_bindings": {"A": {}, "B": {}}},
+        {
+            "source_bindings": {
+                "A": {},
+                "B": {"source_manifest": {"schema_id": "schema", "sha256": "b" * 64}},
+                "C": {"source_manifest": {"path": "/c.json", "schema_id": "schema"}},
+            }
+        },
+    ],
+)
+def test_t111_malformed_or_missing_restore_source_bindings_fail_closed(
+    restore_document,
+):
+    with pytest.raises(t111.T111QualificationError):
+        t111._t085_source_manifest_paths(restore_document)
 
 
 def test_t111_t101_terminal_gate_failure_writes_ineligible_artifact(
