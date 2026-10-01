@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-09-30.
+Last updated: 2026-10-01.
 
 This is the compact, merge-stable projection of the accepted project state on
 `main`. It answers what is true now; it does not narrate a PR's approval or
@@ -192,6 +192,17 @@ separate 20 public-fidelity-stage failures remain unresolved and reserved for
 their own diagnosis lane. No mapping repair, Part-A replay, N>2 convergence,
 training, controller promotion, T034 closure, or T063/T066 activation is
 authorized by T108.
+
+T109's read-only static audit establishes a configured action-domain mismatch
+for those exact 323 accepted T108 failures: all 322 retained `potion` and one
+`potion_discard` public-action occurrences have zero direct Search-root matches
+under frozen `include_potions=false`, while the mapper requires a direct match
+for every non-card public occurrence. T108 did not retain per-row input-state
+metadata; the exact native producer emits these potion action kinds only from
+its `PLAYER_NORMAL` public-action branch. This is not a game-mechanics defect,
+repair, or repair-efficacy result. No dynamic witness ran, and the repair
+architecture remains open. The separate 20 public-fidelity failures remain
+outside T109. See the [T109 static-analysis record](tasks/support/T109/static-analysis-record.md).
 
 The retained closed-route conclusions remain available through the task archive
 and contracts, including the earlier Oracle-guided Search, later-act reach,
