@@ -83,8 +83,8 @@ echo "sts_lightspeed source manifest: $manifest_schema_id v$manifest_version"
 echo "upstream: $upstream_url @ $base_commit"
 echo "integration: $integration_url $integration_ref @ $integration_commit"
 
-if [[ "$integration_commit" != "1458522294d967e8985e1fd52cc15d7ebe7f2acd" ]]; then
-    echo "T107 requires the exact reviewed STSRL-008 merge result" >&2
+if [[ "$integration_commit" != "6496fc1c7e629a374b72bd94f7fd29afe29c7f62" ]]; then
+    echo "T110 requires the exact reviewed STSRL-009 merge result" >&2
     exit 1
 fi
 
@@ -123,12 +123,30 @@ if ! git -C "$source_checkout" merge-base --is-ancestor \
     echo "T107 integration commit does not contain the reviewed STSRL-008 head" >&2
     exit 1
 fi
-if ! git -C "$source_checkout" diff --quiet \
-    264dcacaf9236cd133d8e9147186ad3698b42a3f \
-    "$integration_commit" --; then
-    echo "T107 merge result differs from the reviewed STSRL-008 tree" >&2
+if ! git -C "$source_checkout" merge-base --is-ancestor \
+    1458522294d967e8985e1fd52cc15d7ebe7f2acd "$integration_commit"; then
+    echo "T110 result does not descend from the accepted T107 pin" >&2
     exit 1
 fi
+if ! git -C "$source_checkout" merge-base --is-ancestor \
+    d26f557bf33639f921e5cf16c220d0e1e357f6f2 "$integration_commit"; then
+    echo "T110 result does not contain the reviewed STSRL-009 head" >&2
+    exit 1
+fi
+if [[ "$(git -C "$source_checkout" show -s --format=%P "$integration_commit")" != \
+    "1458522294d967e8985e1fd52cc15d7ebe7f2acd d26f557bf33639f921e5cf16c220d0e1e357f6f2" ]]; then
+    echo "T110 merge parents differ from approved source lineage" >&2
+    exit 1
+fi
+if ! git -C "$source_checkout" diff --quiet \
+    d26f557bf33639f921e5cf16c220d0e1e357f6f2 \
+    "$integration_commit" --; then
+    echo "T110 merge result differs from the reviewed STSRL-009 tree" >&2
+    exit 1
+fi
+echo "T110 lineage parents: $(git -C "$source_checkout" show -s --format=%P "$integration_commit")"
+echo "T110 reviewed tree: $(git -C "$source_checkout" rev-parse d26f557bf33639f921e5cf16c220d0e1e357f6f2^{tree})"
+echo "T110 merged tree: $(git -C "$source_checkout" rev-parse "$integration_commit^{tree}")"
 
 worktree=$(mktemp -d "${TMPDIR:-/tmp}/stsrl-lightspeed-source.XXXXXX")
 cleanup() {
@@ -181,6 +199,7 @@ from sts_combat_rl.sim.lightspeed_source import load_lightspeed_source_manifest
 from sts_combat_rl.sim.t099_particle_search_bridge import (
     validate_t099_particle_search_audit,
     validate_t099_particle_search_bridge,
+    validate_particle_search_bridge_v2,
 )
 from sts_combat_rl.sim.t105_native_stage_observability import (
     validate_t105_stage_audit,
@@ -245,6 +264,7 @@ for method_name in (
     "last_particle_search_stage_diagnostics",
     "stsr007_particle_search_stage_audit",
     "stsr008_root_occurrence_mapping_audit",
+    "stsr009_configuration_aware_root_mapping_audit",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
 ):
@@ -565,7 +585,7 @@ if failed_visibility_audit:
     )
 
 validate_t099_particle_search_audit(sim.stsr006_particle_search_audit())
-t099_bridge = validate_t099_particle_search_bridge(
+t099_bridge = validate_particle_search_bridge_v2(
     sim.sample_hidden_future_particles_search(17, 0, 2, 1, False)
 )
 validate_t105_stage_trace(
@@ -780,6 +800,7 @@ observed_capabilities = {
     "native_stsr006_particle_search_bridge",
     "native_stsr007_particle_search_stage_observability",
     "native_stsr008_root_occurrence_mapping_observability",
+    "native_stsr009_configuration_aware_root_mapping",
 }
 missing = sorted(observed_capabilities.difference(expected_capabilities))
 if missing:
@@ -791,6 +812,10 @@ PY
 python3 scripts/stsrl_api_smoke.py --build-dir "$build_dir"
 PYTHONPATH="$worktree/$build_dir" python3 scripts/test_t096_public_information_sampler.py
 PYTHONPATH="$worktree/$build_dir" python3 scripts/test_t096_visibility_transitions.py \
+    --build-dir "$build_dir"
+
+PYTHONPATH="$worktree/$build_dir:$repo_root/src" python3 \
+    "$repo_root/scripts/test_stsr009_configuration_aware_root_mapping.py" \
     --build-dir "$build_dir"
 python3 scripts/test_t096_particle_search_bridge.py --build-dir "$build_dir"
 python3 scripts/test_battle_search_v2_tree_geometry.py --build-dir "$build_dir"

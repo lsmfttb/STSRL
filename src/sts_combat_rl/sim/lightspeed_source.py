@@ -33,6 +33,7 @@ REQUIRED_NATIVE_CAPABILITY_IDS = (
     "native_stsr006_particle_search_bridge",
     "native_stsr007_particle_search_stage_observability",
     "native_stsr008_root_occurrence_mapping_observability",
+    "native_stsr009_configuration_aware_root_mapping",
 )
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 

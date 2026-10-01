@@ -7,6 +7,7 @@ across that boundary; it never reconstructs or stores native particle state.
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from collections.abc import Mapping
 from typing import Any
@@ -21,6 +22,12 @@ T099_BRIDGE_NATIVE_API = "StepSimulator.sample_hidden_future_particles_search.v1
 T099_AUDIT_SCHEMA_ID = "native-stsr006-particle-search-audit-v1"
 T099_MAPPING_SCHEMA_ID = "native-search-root-occurrence-equivalence-v1"
 T099_VALUE_SEMANTICS = "full_state_continuation_strategy_fusion_proxy"
+T110_BRIDGE_SCHEMA_ID = "native-battle-public-particle-search-v2"
+T110_BRIDGE_NATIVE_API = "StepSimulator.sample_hidden_future_particles_search.v2"
+T110_MAPPING_SCHEMA_ID = "native-search-root-occurrence-equivalence-v2"
+T110_COMPLETION_SEMANTICS = (
+    "every_public_occurrence_classified_and_every_search_edge_covered"
+)
 
 T099_REQUIRED_AUDIT_PREDICATES = (
     "direct_sampler_parity",
@@ -83,7 +90,29 @@ def validate_t099_particle_search_audit(value: object) -> dict[str, Any]:
 
 
 def validate_t099_particle_search_bridge(value: object) -> dict[str, Any]:
-    """Validate one bounded native particle-to-Search bridge response."""
+    """Dispatch explicitly between the historical v1 and configuration-aware v2."""
+
+    report = _mapping(value, "particle-Search bridge report")
+    if report.get("schema_id") == T099_BRIDGE_SCHEMA_ID:
+        return validate_particle_search_bridge_v1(report)
+    if report.get("schema_id") == T110_BRIDGE_SCHEMA_ID:
+        return validate_particle_search_bridge_v2(report)
+    raise T099ParticleSearchBridgeError("unknown particle-Search bridge schema")
+
+
+def validate_particle_search_bridge_v1(value: object) -> dict[str, Any]:
+    """Retain T099's strict every-public-occurrence-has-an-edge contract."""
+
+    return _validate_bridge(value, version=1)
+
+
+def validate_particle_search_bridge_v2(value: object) -> dict[str, Any]:
+    """Validate T110's explicit classified-occurrence contract, with no fallback."""
+
+    return _validate_bridge(value, version=2)
+
+
+def _validate_bridge(value: object, *, version: int) -> dict[str, Any]:
 
     report = _mapping(value, "T099 particle-Search bridge report")
     required_top_level = {
@@ -101,9 +130,11 @@ def validate_t099_particle_search_bridge(value: object) -> dict[str, Any]:
         "particles",
     }
     _require_exact_keys(report, required_top_level, "T099 bridge report")
-    if report["schema_id"] != T099_BRIDGE_SCHEMA_ID:
+    schema = T099_BRIDGE_SCHEMA_ID if version == 1 else T110_BRIDGE_SCHEMA_ID
+    api = T099_BRIDGE_NATIVE_API if version == 1 else T110_BRIDGE_NATIVE_API
+    if report["schema_id"] != schema:
         raise T099ParticleSearchBridgeError("T099 bridge schema mismatch")
-    if report["native_api"] != T099_BRIDGE_NATIVE_API:
+    if report["native_api"] != api:
         raise T099ParticleSearchBridgeError("T099 bridge native API mismatch")
     if report["information_regime"] != (
         "normal_belief_search_outer_full_simulator_state_oracle_like_continuation"
@@ -139,7 +170,7 @@ def validate_t099_particle_search_bridge(value: object) -> dict[str, Any]:
             "T099 anchor ordered public legal actions disagree with the projection"
         )
 
-    _validate_semantic_boundary(report["semantic_boundary"])
+    _validate_semantic_boundary(report["semantic_boundary"], version=version)
     particles = report["particles"]
     if not isinstance(particles, list) or len(particles) != particle_count:
         raise T099ParticleSearchBridgeError(
@@ -150,7 +181,14 @@ def validate_t099_particle_search_bridge(value: object) -> dict[str, Any]:
     )
     observed_indices: list[int] = []
     for particle in particles:
-        row = _validate_particle_row(particle, anchor_projection, anchor_actions)
+        row = _validate_particle_row(
+            particle,
+            anchor_projection,
+            anchor_actions,
+            version=version,
+            include_potions=report["include_potions"],
+            search_simulations=report["search_simulations"],
+        )
         observed_indices.append(row["particle_index"])
     if observed_indices != expected_indices:
         raise T099ParticleSearchBridgeError(
@@ -159,7 +197,7 @@ def validate_t099_particle_search_bridge(value: object) -> dict[str, Any]:
     return report
 
 
-def _validate_semantic_boundary(value: object) -> None:
+def _validate_semantic_boundary(value: object, *, version: int = 1) -> None:
     semantics = _mapping(value, "T099 semantic boundary")
     _require_exact_keys(
         semantics,
@@ -170,7 +208,8 @@ def _validate_semantic_boundary(value: object) -> None:
             "q_public_claim",
             "executable_no_sl_continuation_claim",
             "information_set_optimal_claim",
-        },
+        }
+        | ({"configuration_excluded_action_values"} if version == 2 else set()),
         "T099 semantic boundary",
     )
     expected = {
@@ -183,6 +222,8 @@ def _validate_semantic_boundary(value: object) -> None:
         "executable_no_sl_continuation_claim": False,
         "information_set_optimal_claim": False,
     }
+    if version == 2:
+        expected["configuration_excluded_action_values"] = "not_evaluated_not_numeric"
     if semantics != expected:
         raise T099ParticleSearchBridgeError(
             "T099 bridge mixed information-regime semantics changed"
@@ -193,6 +234,10 @@ def _validate_particle_row(
     value: object,
     anchor_projection: Mapping[str, Any],
     anchor_actions: list[dict[str, Any]],
+    *,
+    version: int = 1,
+    include_potions: bool = False,
+    search_simulations: int = 1,
 ) -> dict[str, Any]:
     row = _mapping(value, "T099 bridge particle")
     _require_exact_keys(
@@ -210,7 +255,15 @@ def _validate_particle_row(
             "search_value_semantics",
             "root_evaluation",
             "root_rows",
-        },
+        }
+        | (
+            {
+                "root_action_mapping_completion_semantics",
+                "configuration_excluded_public_action_count",
+            }
+            if version == 2
+            else set()
+        ),
         "T099 bridge particle",
     )
     _nonnegative_int(row["particle_index"], "particle_index")
@@ -245,13 +298,47 @@ def _validate_particle_row(
         raise T099ParticleSearchBridgeError("T099 root mapping is ambiguous")
     if row["search_value_semantics"] != T099_VALUE_SEMANTICS:
         raise T099ParticleSearchBridgeError("T099 returned value semantics changed")
-    root_rows = _validate_root_rows(row["root_rows"], actions)
-    _validate_root_evaluation(row["root_evaluation"], actions, root_rows)
+    root_rows = _validate_root_rows(
+        row["root_rows"],
+        actions,
+        version=version,
+        include_potions=include_potions,
+        input_state=anchor_projection.get("input_state"),
+    )
+    _validate_root_evaluation(
+        row["root_evaluation"],
+        actions,
+        root_rows,
+        version=version,
+        include_potions=include_potions,
+        search_simulations=search_simulations,
+    )
+    if version == 2:
+        excluded = sum(
+            r["mapping_classification"] == "search_configuration_excluded"
+            for r in root_rows
+        )
+        if (
+            row["root_action_mapping_completion_semantics"] != T110_COMPLETION_SEMANTICS
+            or _nonnegative_int(
+                row["configuration_excluded_public_action_count"],
+                "particle excluded count",
+            )
+            != excluded
+        ):
+            raise T099ParticleSearchBridgeError(
+                "v2 particle classification counts/semantics disagree"
+            )
     return row
 
 
 def _validate_root_rows(
-    value: object, actions: list[dict[str, Any]]
+    value: object,
+    actions: list[dict[str, Any]],
+    *,
+    version: int = 1,
+    include_potions: bool = False,
+    input_state: object = None,
 ) -> list[dict[str, Any]]:
     if not isinstance(value, list) or len(value) != len(actions):
         raise T099ParticleSearchBridgeError(
@@ -268,6 +355,8 @@ def _validate_root_rows(
         "search_equivalence_source_edge_index",
         "search_equivalence_mapping_mode",
     }
+    if version == 2:
+        required |= {"mapping_classification", "configuration_exclusion_reason"}
     for ordinal, value_row in enumerate(value):
         row = _mapping(value_row, "T099 sanitized root row")
         _require_exact_keys(row, required, "T099 sanitized root row")
@@ -277,6 +366,53 @@ def _validate_root_rows(
             raise T099ParticleSearchBridgeError(
                 "T099 root row lost public action identity or ordinal"
             )
+        if version == 2:
+            _nonnegative_int(row["public_action_ordinal"], "public ordinal")
+            classification = row["mapping_classification"]
+            if classification == "search_configuration_excluded":
+                if (
+                    input_state != "PLAYER_NORMAL"
+                    or row["scope"] != "battle"
+                    or row["kind"] not in {"potion", "potion_discard"}
+                    or include_potions is not False
+                    or row["configuration_exclusion_reason"] != "include_potions_false"
+                    or row["search_tree_present"] is not False
+                    or _nonnegative_int(row["visits"], "excluded visits") != 0
+                    or any(
+                        row[k] is not None
+                        for k in (
+                            "search_edge_index",
+                            "search_equivalence_source_edge_index",
+                            "search_equivalence_mapping_mode",
+                            "evaluation_sum",
+                            "mean_value",
+                        )
+                    )
+                ):
+                    raise T099ParticleSearchBridgeError(
+                        "invalid v2 configuration-excluded row"
+                    )
+                rows.append(row)
+                continue
+            expected_mode = {
+                "searched_direct": "direct_action_bits",
+                "searched_mechanical_duplicate_card_occurrence": "mechanical_duplicate_card_occurrence",
+            }.get(classification)
+            if (
+                expected_mode is None
+                or row["configuration_exclusion_reason"] is not None
+                or row["search_equivalence_mapping_mode"] != expected_mode
+                or row["search_tree_present"] is not True
+                or (
+                    expected_mode == "mechanical_duplicate_card_occurrence"
+                    and row["kind"] != "card"
+                )
+                or (not include_potions and row["kind"] in {"potion", "potion_discard"})
+            ):
+                raise T099ParticleSearchBridgeError(
+                    "invalid v2 searched classification"
+                )
+            _nonnegative_int(row["search_edge_index"], "Search edge index")
         source_edge = _nonnegative_int(
             row["search_equivalence_source_edge_index"], "source edge index"
         )
@@ -308,6 +444,11 @@ def _validate_root_rows(
             raise T099ParticleSearchBridgeError(
                 "T099 visited root row mean_value is not numeric"
             )
+        if version == 2 and (
+            not math.isfinite(evaluation_sum)
+            or (mean_value is not None and not math.isfinite(mean_value))
+        ):
+            raise T099ParticleSearchBridgeError("v2 searched values must be finite")
         rows.append(row)
     return rows
 
@@ -316,17 +457,26 @@ def _validate_root_evaluation(
     value: object,
     actions: list[dict[str, Any]],
     root_rows: list[dict[str, Any]],
+    *,
+    version: int = 1,
+    include_potions: bool = False,
+    search_simulations: int = 1,
 ) -> None:
     root = _mapping(value, "T099 root evaluation")
     if root.get("information_regime") != "full_simulator_state_oracle_like":
         raise T099ParticleSearchBridgeError(
             "T099 per-particle continuation is not labeled oracle-like"
         )
-    if root.get("native_api") != T099_BRIDGE_NATIVE_API:
+    api = T099_BRIDGE_NATIVE_API if version == 1 else T110_BRIDGE_NATIVE_API
+    mapping_schema = T099_MAPPING_SCHEMA_ID if version == 1 else T110_MAPPING_SCHEMA_ID
+    if root.get("native_api") != api:
         raise T099ParticleSearchBridgeError("T099 root native API mismatch")
-    if root.get("patch_identity") != "sts_lightspeed_native_particle_search_bridge_v1":
+    if (
+        root.get("patch_identity")
+        != f"sts_lightspeed_native_particle_search_bridge_v{version}"
+    ):
         raise T099ParticleSearchBridgeError("T099 root patch identity mismatch")
-    if root.get("root_action_mapping_schema") != T099_MAPPING_SCHEMA_ID:
+    if root.get("root_action_mapping_schema") != mapping_schema:
         raise T099ParticleSearchBridgeError("T099 root mapping schema mismatch")
     if root.get("root_rows") != root_rows:
         raise T099ParticleSearchBridgeError(
@@ -334,10 +484,82 @@ def _validate_root_evaluation(
         )
     if root.get("root_row_count") != len(actions):
         raise T099ParticleSearchBridgeError("T099 root row count is incomplete")
-    if root.get("unsearched_legal_action_count") != 0:
+    excluded = sum(
+        r.get("mapping_classification") == "search_configuration_excluded"
+        for r in root_rows
+    )
+    if root.get("unsearched_legal_action_count") != excluded:
         raise T099ParticleSearchBridgeError("T099 root has unsearched public actions")
     if root.get("unmapped_search_edge_count") != 0:
         raise T099ParticleSearchBridgeError("T099 root has unmapped Search edges")
+    if version == 2:
+        _require_exact_keys(
+            root,
+            {
+                "schema_id",
+                "native_api",
+                "patch_identity",
+                "information_regime",
+                "simulations_requested",
+                "root_visits",
+                "include_potions",
+                "native_simulator_steps",
+                "model_calls",
+                "best_action_value",
+                "min_action_value",
+                "outcome_player_hp",
+                "root_row_count",
+                "search_edge_count",
+                "unsearched_legal_action_count",
+                "unmapped_search_edge_count",
+                "work_counters",
+                "search_v2_configuration",
+                "root_rows",
+                "root_action_mapping_schema",
+                "root_action_mapping",
+                "root_action_mapping_completion_semantics",
+                "configuration_excluded_public_action_count",
+            },
+            "v2 root evaluation",
+        )
+        if (
+            root["schema_id"] != "native-battle-search-root-v2"
+            or root["include_potions"] is not include_potions
+            or root["simulations_requested"] != search_simulations
+            or root["root_action_mapping_completion_semantics"]
+            != T110_COMPLETION_SEMANTICS
+            or _nonnegative_int(
+                root["configuration_excluded_public_action_count"],
+                "root excluded count",
+            )
+            != excluded
+        ):
+            raise T099ParticleSearchBridgeError(
+                "v2 root schema/configuration/counts disagree"
+            )
+        for key in (
+            "root_row_count",
+            "search_edge_count",
+            "unsearched_legal_action_count",
+            "unmapped_search_edge_count",
+        ):
+            _nonnegative_int(root[key], key)
+        for key in (
+            "root_visits",
+            "native_simulator_steps",
+            "model_calls",
+            "simulations_requested",
+        ):
+            _nonnegative_int(root[key], key)
+        for key in ("best_action_value", "min_action_value", "outcome_player_hp"):
+            if (
+                isinstance(root[key], bool)
+                or not isinstance(root[key], (int, float))
+                or not math.isfinite(root[key])
+            ):
+                raise T099ParticleSearchBridgeError(
+                    f"v2 {key} must be finite numeric data"
+                )
 
     configuration = _mapping(
         root.get("search_v2_configuration"), "T099 Search-v2 configuration"
@@ -371,7 +593,9 @@ def _validate_root_evaluation(
             "T099 occurrence mapping count disagrees with public actions"
         )
     edge_counts = Counter(
-        row["search_equivalence_source_edge_index"] for row in root_rows
+        row["search_equivalence_source_edge_index"]
+        for row in root_rows
+        if row["search_equivalence_source_edge_index"] is not None
     )
     source_actions_by_edge: dict[int, dict[str, Any]] = {}
     for ordinal, value_row in enumerate(mappings):
@@ -385,13 +609,16 @@ def _validate_root_evaluation(
                 "mapping_mode",
                 "source_action",
                 "edge_public_occurrence_count",
-            },
+            }
+            | (
+                {"mapping_classification", "configuration_exclusion_reason"}
+                if version == 2
+                else set()
+            ),
             "T099 occurrence mapping row",
         )
         public_action = _action_identity(mapping["public_action"], "public action")
-        source_action = _action_identity(mapping["source_action"], "source action")
         root_row = root_rows[ordinal]
-        edge_index = _nonnegative_int(mapping["search_edge_index"], "Search edge")
         if (
             mapping["public_action_ordinal"] != ordinal
             or public_action != actions[ordinal]
@@ -399,6 +626,32 @@ def _validate_root_evaluation(
             raise T099ParticleSearchBridgeError(
                 "T099 occurrence mapping lost public ordinal or identity"
             )
+        if version == 2:
+            _nonnegative_int(mapping["public_action_ordinal"], "mapping ordinal")
+            if (
+                mapping["mapping_classification"] != root_row["mapping_classification"]
+                or mapping["configuration_exclusion_reason"]
+                != root_row["configuration_exclusion_reason"]
+            ):
+                raise T099ParticleSearchBridgeError(
+                    "v2 mapping classification disagrees with root row"
+                )
+            if root_row["mapping_classification"] == "search_configuration_excluded":
+                if any(
+                    mapping[k] is not None
+                    for k in (
+                        "search_edge_index",
+                        "mapping_mode",
+                        "source_action",
+                        "edge_public_occurrence_count",
+                    )
+                ):
+                    raise T099ParticleSearchBridgeError(
+                        "v2 excluded mapping must have null edge/source/count"
+                    )
+                continue
+        source_action = _action_identity(mapping["source_action"], "source action")
+        edge_index = _nonnegative_int(mapping["search_edge_index"], "Search edge")
         if edge_index != root_row["search_equivalence_source_edge_index"]:
             raise T099ParticleSearchBridgeError(
                 "T099 occurrence mapping source edge disagrees with root row"
@@ -427,6 +680,23 @@ def _validate_root_evaluation(
             raise T099ParticleSearchBridgeError(
                 "T099 public occurrences disagree about the source action identity"
             )
+    if version == 2:
+        if set(edge_counts) != set(range(root["search_edge_count"])):
+            raise T099ParticleSearchBridgeError("v2 root has an uncovered Search edge")
+        if sum(edge_counts.values()) + excluded != len(actions):
+            raise T099ParticleSearchBridgeError(
+                "v2 public occurrence classification is incomplete"
+            )
+        for edge, source in source_actions_by_edge.items():
+            if not any(
+                m["search_edge_index"] == edge
+                and m["mapping_mode"] == "direct_action_bits"
+                and m["public_action"] == source
+                for m in mappings
+            ):
+                raise T099ParticleSearchBridgeError(
+                    "v2 duplicate mapping lacks direct representative"
+                )
 
 
 def _action_list(value: object, label: str) -> list[dict[str, Any]]:

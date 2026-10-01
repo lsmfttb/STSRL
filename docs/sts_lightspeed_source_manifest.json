@@ -9,7 +9,7 @@
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
     "branch": "stsrl/main",
     "ref": "refs/heads/stsrl/main",
-    "commit": "1458522294d967e8985e1fd52cc15d7ebe7f2acd"
+    "commit": "6496fc1c7e629a374b72bd94f7fd29afe29c7f62"
   },
   "python_module": {
     "name": "slaythespire",
@@ -270,7 +270,7 @@
     },
     {
       "id": "native_stsr006_particle_search_bridge",
-      "description": "Native STSRL-006 bridge from the accepted public-consistent hidden-future sampler to unchanged per-particle Search-v2. The outer distribution is native public-consistent sampling; each ephemeral particle continuation is full_simulator_state_oracle_like; returned per-particle values are full_state_continuation_strategy_fusion_proxy. The bridge performs no cross-particle aggregation or action selection and rejects exact Q_public, executable no-SL continuation, information-set-optimal Search, exact Bayesian/deterministic-seed posterior expectation, and IID posterior-sampling claims. It preserves exact public projection and ordered public legal-action parity, maps every Search-v2 root row back to a public action occurrence with explicit direct or mechanically deduplicated duplicate-card provenance, sanitizes replay-only action bits, reports Search work counters, and fails closed on unsupported anchors and incomplete or ambiguous mappings.",
+      "description": "Historical STSRL-006 v1 bridge contract, retained with strict every-public-occurrence edge semantics. The current runtime uses the explicitly versioned STSRL-009 v2 successor described separately. The outer distribution is native public-consistent sampling; each ephemeral particle continuation is full_simulator_state_oracle_like; returned per-particle values are full_state_continuation_strategy_fusion_proxy. The bridge performs no cross-particle aggregation or action selection and rejects exact Q_public, executable no-SL continuation, information-set-optimal Search, exact Bayesian/deterministic-seed posterior expectation, and IID posterior-sampling claims. It preserves exact public projection and ordered public legal-action parity, explicit direct or mechanically deduplicated duplicate-card provenance, sanitized action identities, Search work counters, and fail-closed unsupported anchors and incomplete or ambiguous mappings.",
       "task_provenance": [
         "T099"
       ],
@@ -344,7 +344,7 @@
     },
     {
       "id": "native_stsr008_root_occurrence_mapping_observability",
-      "description": "Additive structured subreason observability for existing root-occurrence mapping control flow. The per-particle diagnostic distinguishes the seven fail-closed mapping branches from successful mapping completion without changing mapping, Search, sampler, projection, fidelity, or RNG behavior. It identifies a mapping control-flow subreason, not a game-mechanics root cause or repair efficacy. The bounded diagnostic exposes only safe public occurrence/action-kind metadata and aggregate public/root-edge/mapping/coverage counts with match multiplicities; it excludes raw action bits, specialData, hidden Battle/Search/RNG/intent/trajectory state, and exception prose. Deterministic audit witnesses use fixed private test injections unavailable to production bridge callers.",
+      "description": "Historical STSRL-008 diagnostic v1 for root-occurrence mapping control flow, retained independently; current runtime uses diagnostic v2 counts through STSRL-009. The seven fail-closed branches remain authoritative. It identifies a mapping control-flow subreason, not a game-mechanics root cause or repair efficacy. The bounded diagnostic exposes safe public occurrence/action-kind metadata and aggregate public/root-edge/mapping/coverage counts with match multiplicities; it excludes raw action bits, specialData, hidden Battle/Search/RNG/intent/trajectory state, and exception prose. Deterministic audit witnesses use fixed private test injections unavailable to production bridge callers.",
       "task_provenance": [
         "T107"
       ],
@@ -387,6 +387,25 @@
         "StepSimulator.stsr008_root_occurrence_mapping_audit.later_particle_not_mapping_attempted",
         "StepSimulator.stsr008_root_occurrence_mapping_audit.snapshot_attempt_isolation",
         "StepSimulator.stsr008_root_occurrence_mapping_audit.diagnostic_field_whitelist"
+      ]
+    },
+    {
+      "id": "native_stsr009_configuration_aware_root_mapping",
+      "description": "STSRL-009 v2 classifies every public occurrence and covers every configured Search edge. Only PLAYER_NORMAL potion-use/discard occurrences excluded by include_potions=false retain null edge/source/evaluation/mean fields and zero visits, with include_potions_false reason; absent values are not numeric zero. Direct and mechanically duplicate searched rows retain their prior semantics. Diagnostic v2 preserves all seven fail-closed subreasons while counting searched and configuration-excluded occurrences separately. The deterministic audit proves unchanged Search surface/work/RNG, sampler/fidelity behavior and production injection isolation. This capability does not redefine T101 finite-value/ranking admission or establish population support.",
+      "task_provenance": ["T110"],
+      "required_python_api": [
+        "StepSimulator.sample_hidden_future_particles_search.schema_id.native-battle-public-particle-search-v2",
+        "StepSimulator.sample_hidden_future_particles_search.native_api.StepSimulator.sample_hidden_future_particles_search.v2",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.schema_id.native-battle-search-root-v2",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.root_action_mapping_schema.native-search-root-occurrence-equivalence-v2",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_action_mapping_completion_semantics",
+        "StepSimulator.sample_hidden_future_particles_search.semantic_boundary.configuration_excluded_action_values",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.schema_id.native-root-occurrence-mapping-diagnostic-v2",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.public_occurrences_classified",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.searched_public_occurrence_count",
+        "StepSimulator.last_particle_search_stage_diagnostics.particles.root_occurrence_mapping_diagnostic.configuration_excluded_public_occurrence_count",
+        "StepSimulator.stsr009_configuration_aware_root_mapping_audit",
+        "StepSimulator.stsr009_configuration_aware_root_mapping_audit.schema_id.native-stsr009-configuration-aware-root-mapping-audit-v1"
       ]
     }
   ],

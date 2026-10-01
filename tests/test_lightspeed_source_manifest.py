@@ -36,7 +36,7 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
     )
     assert manifest.integration.branch == "stsrl/main"
     assert manifest.integration.ref == "refs/heads/stsrl/main"
-    assert manifest.integration.commit == ("1458522294d967e8985e1fd52cc15d7ebe7f2acd")
+    assert manifest.integration.commit == ("6496fc1c7e629a374b72bd94f7fd29afe29c7f62")
     assert set(REQUIRED_NATIVE_CAPABILITY_IDS).issubset(manifest.capability_ids)
     assert "native_battle_search_root" in manifest.capability_ids
     assert "native_root_prior_allocation" in manifest.capability_ids
@@ -292,6 +292,37 @@ def test_lightspeed_source_identity_manifest_path_is_cwd_stable(
 
     assert first == second
     assert first["manifest_path"] == "docs/sts_lightspeed_source_manifest.json"
+
+
+def test_t110_inventory_and_verifier_require_exact_v2_source_acceptance() -> None:
+    manifest = load_lightspeed_source_manifest()
+    capability = next(
+        item
+        for item in manifest.supported_native_capabilities
+        if item.capability_id == "native_stsr009_configuration_aware_root_mapping"
+    )
+    assert capability.task_provenance == ("T110",)
+    for schema in (
+        "native-battle-public-particle-search-v2",
+        "native-battle-search-root-v2",
+        "native-search-root-occurrence-equivalence-v2",
+        "native-root-occurrence-mapping-diagnostic-v2",
+    ):
+        assert any(schema in api for api in capability.required_python_api)
+    assert "T101" in capability.description
+    verifier = (
+        Path(__file__).parents[1] / "scripts/verify_lightspeed_source.sh"
+    ).read_text(encoding="utf-8")
+    for required in (
+        "6496fc1c7e629a374b72bd94f7fd29afe29c7f62",
+        "d26f557bf33639f921e5cf16c220d0e1e357f6f2",
+        "validate_particle_search_bridge_v2",
+        "test_stsr009_configuration_aware_root_mapping.py",
+        "T110 merge parents",
+        "T110 reviewed tree",
+        "T110 merged tree",
+    ):
+        assert required in verifier
 
 
 def test_lightspeed_source_manifest_missing_file_fails(tmp_path) -> None:
