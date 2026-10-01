@@ -35,6 +35,25 @@ def test_status_field_is_reserved_for_task_index() -> None:
     assert offenders == []
 
 
+def test_t109_diagnostic_method_docs_are_discoverable() -> None:
+    template = ROOT / "docs" / "tasks" / "TEMPLATE.md"
+    method = (template.parent / ".." / "diagnostic_method.md").resolve()
+    t109 = (
+        ROOT
+        / "docs"
+        / "tasks"
+        / "T109-static-first-root-mapping-action-domain-audit.md"
+    )
+
+    template_text = template.read_text(encoding="utf-8")
+    t109_text = t109.read_text(encoding="utf-8")
+    assert method.is_file()
+    assert "## Diagnostic Method Gate" in template_text
+    assert "../diagnostic_method.md" in template_text
+    assert "## Static Sufficiency Gate" in t109_text
+    assert "ROOT_MAPPING_ACTION_DOMAIN_MISMATCH_ESTABLISHED" in t109_text
+
+
 def test_published_learning_artifact_docs_have_eligibility_contract() -> None:
     offenders = {
         str(path.relative_to(ROOT)): check_published_task_doc(path)
