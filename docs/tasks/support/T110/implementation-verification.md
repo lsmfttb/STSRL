@@ -33,7 +33,7 @@ commits to the native repository.
 
 ## Canonical disposable build and retained attempts
 
-The successful canonical command was:
+The canonical command for successful attempts 2 and 3 was:
 
 ```text
 env STSRL_LIGHTSPEED_BUILD_JOBS=16 bash scripts/verify_lightspeed_source.sh /home/lsmft/stsrl-spikes/sts_lightspeed-t101-97f59b6
@@ -54,9 +54,9 @@ The successful attempt was run on STSRL producer
 `2026-10-01T14:28:17.630764Z`, ended `2026-10-01T14:28:44.079109Z`, elapsed
 26.448345 seconds, `SUCCEEDED`, exit 0. Supervisor/target 438/439 were
 absent after termination. The verifier cleaned its disposable worktree.
-Subsequent changes add exact runtime-identity compatibility and factual
-documentation only; native pin, verifier, v2 bridge and diagnostic behavior
-are unchanged from this successful producer.
+Subsequent changes added exact runtime-identity compatibility and factual
+documentation. The later Maintainer-requested v2 diagnostic completion
+repair was reverified in the separate successful attempt 3 below.
 
 Retained local evidence root:
 `D:\DeadlyCatCoding\STSRL\artifacts\t110-source-acceptance`.
@@ -75,6 +75,30 @@ the concrete model-call count belongs to typed work counters. The correction
 requires null for this v2 aggregate field, leaves v1 validation unchanged,
 and never imputes numeric zero. Attempt 1 ended `FAILED`/exit 1; its output
 does not substitute for the passing attempt 2.
+
+### Post-review empty-surface completion repair
+
+Maintainer review found that all-zero v2 completion counts could incorrectly
+pass despite the native fail-closed `no_public_legal_action_surface` branch.
+Only v2 `completed` now rejects zero public legal occurrences. A regression
+test also proves the valid v2 empty-surface failure remains accepted and the
+historical v1 all-zero behavior is unchanged.
+
+The changed diagnostic helper is exercised by the STSRL-owned STSRL-008
+canonical smoke, so canonical attempt 3 ran on repaired implementation
+producer `98d72e11ba67e75981dd43b98ce7ee2af488336a`. It fetched and rebuilt
+the same exact native pin in `/tmp/stsrl-lightspeed-source.rvJgFk`, started
+`2026-10-01T14:55:06.620048Z`, finished `2026-10-01T14:55:50.116695Z`, and
+passed in 43.496647 seconds (`SUCCEEDED`, exit 0). All previously required
+native/API/sampler/visibility/STSRL-006/007/008/009/Search gates passed again.
+Supervisor/target 457/458 were absent after termination; stdout/stderr and
+disposable build/import evidence were inspected. No native edit occurred.
+
+| Relative path | Bytes | SHA-256 |
+|---|---:|---|
+| `canonical-verifier-attempt-3/status.json` | 904 | `fe99ba620edf30a8353431ef5202af74ea7dabaec29cb23400ba3136e7169425` |
+| `canonical-verifier-attempt-3/stdout.log` | 7383 | `57ebc441ddf3c8607fd8175a01509702caafcf4ca3bb7d802cbdf68de211e339` |
+| `canonical-verifier-attempt-3/stderr.log` | 610 | `852484fb757818002d98696e161b5a2cd7b15650710e083d210235c66d43f8fc` |
 
 Earlier source acquisition completed the exact pinned submodules, but its
 volatile `/tmp/stsrl-t110-native-source` directory later disappeared across
@@ -133,7 +157,7 @@ of excluded rows still requires a separately approved successor contract.
 | 11–13 | Independent strict v2 searched/excluded/null/count/order controls and unchanged strict v1 tests passed; unknown schemas rejected. |
 | 14–15 | Positional/keyword production failure-injection attempts rejected with TypeError; audit does not accept caller injection. Exact sanitized field contracts and negative private-field controls passed. |
 | 16 | Exact-source Search-v2 tree geometry and native T079 state-utilization checks passed; no replacement Search path. |
-| 17 | Final focused tests 121 passed; compileall, changed-file Ruff and diff checks passed. Full-suite/baseline qualifications below. |
+| 17 | Final repaired focused tests 122 passed; compileall, changed-file Ruff and diff checks passed. Full-suite/baseline qualifications below. |
 
 All STSRL-009 predicates were independently required as boolean true by
 the STSRL-owned audit validator (missing/false/null/integer-one rejected):
@@ -150,7 +174,8 @@ sampler/public-fidelity regressions.
 ## Repository checks and honest baseline qualifications
 
 Final focused command covers T110, T099, T107, source manifest, T105, T096,
-T098, T077 and task-doc tests: **121 passed**.
+T098, T077 and task-doc tests: **122 passed**, including the new empty-surface
+regression (the preceding implementation check had 121 passed).
 `python -m compileall -q src tests`, shell syntax checking, and
 `git diff --check` passed. Ruff 0.16.5 touched files pass except the same
 three inherited TRY004 diagnostics in `lightspeed_source.py`; normalized
@@ -161,7 +186,8 @@ each side, with zero added diagnostic/path/message tuples. Formatting is
 Unrestricted Windows collection has four inherited environment errors:
 two T085 modules require unavailable torch, and two T092 execution modules
 require Linux `resource`. Excluding those four modules, the final Windows
-suite is **1574 passed, 39 skipped, 10 failed** in 91.90 seconds. All ten
+suite before the narrow empty-surface repair was **1574 passed, 39 skipped,
+10 failed** in 91.90 seconds. All ten
 failure nodes reproduce on exact publication base `f59fcbe`:
 
 - five T088 construction/progressive-bias tests retain historical exact pin
@@ -175,7 +201,8 @@ the named T110 compatibility additions repaired both. Final tests introduced
 no new failure node. This is not an all-green full-suite claim. Raw logs are
 `repository-tests.log`, `repository-tests-final.log`,
 `baseline-failure-reproduction.log`, and `focused-tests-final-2.log` under
-the evidence root. Changed Python/tests pass applicable focused checks;
+the evidence root; the repaired focused result is retained separately in
+`focused-tests-empty-surface-repair.log`. Changed Python/tests pass applicable focused checks;
 historical unrelated failures were not broadened into this task.
 
 ## Bounded interpretation
