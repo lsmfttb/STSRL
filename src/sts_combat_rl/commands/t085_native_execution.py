@@ -189,12 +189,18 @@ T107_ROOT_MAPPING_NATIVE_IDENTITY = {
     "ref": "refs/heads/stsrl/main",
     "commit": "1458522294d967e8985e1fd52cc15d7ebe7f2acd",
 }
+T110_CONFIGURATION_MAPPING_NATIVE_IDENTITY = {
+    "repository": "lsmfttb/sts_lightspeed",
+    "ref": "refs/heads/stsrl/main",
+    "commit": "6496fc1c7e629a374b72bd94f7fd29afe29c7f62",
+}
 _T085_ACCEPTED_RUNTIME_IDENTITIES = (
     dict(T085_NATIVE_IDENTITY),
     dict(T085_PRE_T088_TELEMETRY_NATIVE_IDENTITY),
     dict(T085_ACTIVE_NATIVE_IDENTITY),
     dict(T105_STAGE_OBSERVABILITY_NATIVE_IDENTITY),
     dict(T107_ROOT_MAPPING_NATIVE_IDENTITY),
+    dict(T110_CONFIGURATION_MAPPING_NATIVE_IDENTITY),
 )
 _T085_PROVENANCE_NATIVE_IDENTITY_KEYS = frozenset(
     {"native_identity", "native_source_identity"}
@@ -1752,7 +1758,7 @@ def _validate_t085_native_source_manifest(
     """Require the manifest to name the historical or approved current identity.
 
     T085's retained artifacts remain bound to ``T085_NATIVE_IDENTITY``. The
-    current runtime source manifest may name either approved telemetry
+    current runtime source manifest may name an explicitly approved
     descendant, and fresh runtime provenance must retain that actual identity.
     An explicit expectation is still restricted to this same finite allowlist.
     """

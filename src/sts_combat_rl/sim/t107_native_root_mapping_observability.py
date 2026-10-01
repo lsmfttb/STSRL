@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from typing import Any
 
 DIAGNOSTIC_SCHEMA = "native-root-occurrence-mapping-diagnostic-v1"
+DIAGNOSTIC_V2_SCHEMA = "native-root-occurrence-mapping-diagnostic-v2"
 AUDIT_SCHEMA = "native-stsr008-root-occurrence-mapping-audit-v1"
 
 FAILURE_SUBREASONS = frozenset(
@@ -36,6 +37,11 @@ COUNT_FIELDS = frozenset(
         "mechanical_duplicate_mapping_count",
     }
 )
+V2_COUNT_FIELDS = COUNT_FIELDS | {
+    "public_occurrences_classified",
+    "searched_public_occurrence_count",
+    "configuration_excluded_public_occurrence_count",
+}
 OCCURRENCE_FIELDS = frozenset(
     {
         "public_occurrence_index",
@@ -122,14 +128,17 @@ def validate_t107_mapping_diagnostic(
         raise ValueError("STSRL-008 diagnostic exists before mapping was reached")
 
     diagnostic = _mapping(value, "STSRL-008 mapping diagnostic")
+    schema = diagnostic.get("schema_id")
+    if schema not in {DIAGNOSTIC_SCHEMA, DIAGNOSTIC_V2_SCHEMA}:
+        raise ValueError("STSRL-008 diagnostic schema mismatch")
+    v2 = schema == DIAGNOSTIC_V2_SCHEMA
+    count_fields = V2_COUNT_FIELDS if v2 else COUNT_FIELDS
     keys = set(diagnostic)
-    if keys - DIAGNOSTIC_FIELDS:
+    if keys - (DIAGNOSTIC_FIELDS | (V2_COUNT_FIELDS if v2 else set())):
         raise ValueError("STSRL-008 diagnostic contains a non-whitelisted field")
     base_fields = {"schema_id", "status", "mapping_subreason"}
     if not base_fields <= keys:
         raise ValueError("STSRL-008 diagnostic is missing required base fields")
-    if diagnostic["schema_id"] != DIAGNOSTIC_SCHEMA:
-        raise ValueError("STSRL-008 diagnostic schema mismatch")
 
     diagnostic_status = diagnostic["status"]
     subreason = diagnostic["mapping_subreason"]
@@ -147,12 +156,12 @@ def validate_t107_mapping_diagnostic(
     if diagnostic_status == "completed":
         if mapping_stage_status != "completed" or subreason != "mapping_completed":
             raise ValueError("STSRL-008 completion disagrees with stage status")
-        if keys != base_fields | COUNT_FIELDS:
+        if keys != base_fields | count_fields:
             raise ValueError("STSRL-008 completed diagnostic has unexpected fields")
     elif diagnostic_status == "failed":
         if mapping_stage_status != "failed" or subreason not in FAILURE_SUBREASONS:
             raise ValueError("STSRL-008 failure disagrees with stage status")
-        expected_fields = base_fields | COUNT_FIELDS
+        expected_fields = base_fields | count_fields
         if subreason in {
             "multiple_direct_search_root_matches",
             "missing_non_card_direct_search_root_match",
@@ -171,7 +180,7 @@ def validate_t107_mapping_diagnostic(
     else:
         raise ValueError("STSRL-008 diagnostic status is invalid")
 
-    counts = {name: _nonnegative_int(diagnostic[name], name) for name in COUNT_FIELDS}
+    counts = {name: _nonnegative_int(diagnostic[name], name) for name in count_fields}
     legal_count = counts["public_legal_occurrence_count"]
     edge_count = counts["search_root_edge_count"]
     mapped_count = counts["public_occurrences_mapped"]
@@ -182,20 +191,32 @@ def validate_t107_mapping_diagnostic(
         raise ValueError("STSRL-008 mapping progress exceeds aggregate counts")
     if direct_count + duplicate_count != mapped_count:
         raise ValueError("STSRL-008 mapping counters are inconsistent")
+    classified_count = mapped_count
+    if v2:
+        classified_count = counts["public_occurrences_classified"]
+        if (
+            counts["searched_public_occurrence_count"] != mapped_count
+            or mapped_count + counts["configuration_excluded_public_occurrence_count"]
+            != classified_count
+            or classified_count > legal_count
+        ):
+            raise ValueError("STSRL-009 classification counters are inconsistent")
 
     if diagnostic_status == "completed":
-        if legal_count != mapped_count or edge_count != covered_count:
+        if v2 and legal_count == 0:
+            raise ValueError("STSRL-009 empty public action surface cannot complete")
+        if legal_count != classified_count or edge_count != covered_count:
             raise ValueError("STSRL-008 completion did not map and cover all entries")
         return diagnostic
 
     if subreason == "no_public_legal_action_surface":
-        if legal_count != 0 or mapped_count != 0 or covered_count != 0:
+        if legal_count != 0 or classified_count != 0 or covered_count != 0:
             raise ValueError("STSRL-008 empty-surface counts are inconsistent")
         return diagnostic
     if subreason == "uncovered_search_root_edge":
         if (
             legal_count == 0
-            or mapped_count != legal_count
+            or classified_count != legal_count
             or edge_count <= covered_count
         ):
             raise ValueError("STSRL-008 uncovered-edge counts are inconsistent")
@@ -209,7 +230,7 @@ def validate_t107_mapping_diagnostic(
         raise ValueError(
             "STSRL-008 public action kind is outside the closed vocabulary"
         )
-    if occurrence_index >= legal_count or occurrence_index != mapped_count:
+    if occurrence_index >= legal_count or occurrence_index != classified_count:
         raise ValueError("STSRL-008 occurrence index disagrees with mapping progress")
     direct_multiplicity = diagnostic["direct_match_multiplicity"]
     if not isinstance(direct_multiplicity, str):

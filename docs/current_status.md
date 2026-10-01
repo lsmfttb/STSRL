@@ -48,6 +48,16 @@ their distributions, labels, and evaluation reports remain separate.
   observability. T105 remains the historical stage-observability provenance;
   T107 does not change T099 bridge semantics or diagnose/repair any T106 case.
   See the [T107 execution evidence](tasks/support/T107/maintainer-execution.md).
+- T110 accepts STSRL-009's configuration-aware mapping at exact native pin
+  `6496fc1c7e629a374b72bd94f7fd29afe29c7f62`. Bridge/root/mapping/diagnostic
+  v2 contracts explicitly retain no-potions public potion-use/discard actions
+  as configuration-excluded, with null Search edges and values, not numeric
+  zero. Historical v1 remains strict and independently recognizable. Exact
+  lineage/tree proof, disposable rebuild, deterministic audit and Search
+  invariance passed; [verification evidence](tasks/support/T110/implementation-verification.md)
+  records the bounded capability result. T101 finite-value ranking/admission
+  semantics are unchanged; scientific configured-domain support re-entry
+  remains a separate contract, not an established cohort/convergence result.
 - CommunicationMod formatting remains centralized in
   `src/sts_combat_rl/comm/protocol.py`; CLI modules route to command workflows.
 

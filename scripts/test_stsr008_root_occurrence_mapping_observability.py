@@ -8,7 +8,7 @@ from importlib import import_module
 from pathlib import Path
 
 from sts_combat_rl.sim.t099_particle_search_bridge import (
-    validate_t099_particle_search_bridge,
+    validate_particle_search_bridge_v2,
 )
 from sts_combat_rl.sim.t105_native_stage_observability import (
     validate_t105_stage_trace,
@@ -16,7 +16,7 @@ from sts_combat_rl.sim.t105_native_stage_observability import (
 from sts_combat_rl.sim.t107_native_root_mapping_observability import (
     AUDIT_PREDICATES,
     AUDIT_SCHEMA,
-    DIAGNOSTIC_SCHEMA,
+    DIAGNOSTIC_V2_SCHEMA,
     validate_t107_mapping_audit,
 )
 
@@ -116,7 +116,7 @@ def main() -> None:
         "caller-selected audit injection",
     )
 
-    bridge = validate_t099_particle_search_bridge(
+    bridge = validate_particle_search_bridge_v2(
         _bridge_call_in_active_battle(sim, bridge_call)
     )
     trace = validate_t105_stage_trace(
@@ -130,7 +130,7 @@ def main() -> None:
         if not isinstance(diagnostic, dict):
             raise SystemExit("successful native mapping diagnostic is absent")
         if (
-            diagnostic.get("schema_id") != DIAGNOSTIC_SCHEMA
+            diagnostic.get("schema_id") != DIAGNOSTIC_V2_SCHEMA
             or diagnostic.get("status") != "completed"
             or diagnostic.get("mapping_subreason") != "mapping_completed"
         ):
