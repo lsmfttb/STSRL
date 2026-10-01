@@ -365,6 +365,7 @@ def _authorization_fixture(tmp_path: Path, monkeypatch):
         "authorization_id": "maintainer-authorization-test-unique",
         "authorized": True,
         "decision": "EXECUTION_AUTHORIZED",
+        "implementation_worktree_path": str(repo_root.resolve()),
         "implementation_head": head,
         "approved_spec_commit": "f8ceef6f68bab587f7696d9230fbffd7416b19b2",
         "qualification_artifact": qualification_ref,
@@ -414,6 +415,50 @@ def test_t111_execution_authorization_binds_full_serial_population_and_guard(
         "C": [285, 413],
     }
     assert verified["resource_plan"]["resource_guard"]["batch_id"] == "t111-test-batch"
+
+
+def test_t111_authorization_binds_external_artifacts_to_exact_worktree(
+    tmp_path, monkeypatch
+):
+    authorization, kwargs = _authorization_fixture(tmp_path, monkeypatch)
+    assert kwargs["authorization_path"].parent != kwargs["repo_root"]
+    authorization["implementation_worktree_path"] = str(
+        (tmp_path / "other-worktree").resolve()
+    )
+
+    with pytest.raises(execution_cli.T111ExecutionAuthorizationError):
+        execution_cli.validate_t111_execution_authorization(authorization, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("platform_name", "ru_maxrss", "raw_unit"),
+    [
+        ("linux", 204800, "KiB"),
+        ("darwin", 209715200, "bytes"),
+    ],
+)
+def test_t111_peak_rss_report_uses_post_selector_ru_maxrss_and_units(
+    monkeypatch, platform_name, ru_maxrss, raw_unit
+):
+    selector_state = {"complete": False}
+
+    def getrusage(_who):
+        assert selector_state["complete"] is True
+        return SimpleNamespace(ru_maxrss=ru_maxrss)
+
+    monkeypatch.setattr(
+        execution_cli,
+        "resource",
+        SimpleNamespace(RUSAGE_SELF=0, getrusage=getrusage),
+    )
+    selector_state["complete"] = True
+
+    metrics = execution_cli._capture_process_peak_rss(platform_name=platform_name)
+
+    assert metrics["process_peak_rss_mib"] == 200.0
+    assert metrics["process_peak_rss_raw"] == ru_maxrss
+    assert metrics["process_peak_rss_raw_unit"] == raw_unit
+    assert metrics["process_peak_rss_sample_phase"] == "after_selector_completion"
 
 
 @pytest.mark.parametrize(

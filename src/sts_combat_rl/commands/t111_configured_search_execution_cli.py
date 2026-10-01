@@ -284,6 +284,7 @@ def validate_t111_execution_authorization(
         "authorization_id",
         "authorized",
         "decision",
+        "implementation_worktree_path",
         "implementation_head",
         "approved_spec_commit",
         "qualification_artifact",
@@ -302,6 +303,8 @@ def validate_t111_execution_authorization(
         or not value["authorization_id"].strip()
         or value.get("authorized") is not True
         or value.get("decision") != "EXECUTION_AUTHORIZED"
+        or value.get("implementation_worktree_path")
+        != str(repo_root.resolve(strict=True))
         or value.get("implementation_head") != expected_head
         or value.get("implementation_head") != head
         or branch != _EXPECTED_HEAD_BRANCH
@@ -570,6 +573,39 @@ def _append_jsonl(path: Path, row: Mapping[str, object]) -> None:
         os.fsync(stream.fileno())
 
 
+def _capture_process_peak_rss(
+    *, platform_name: str = sys.platform
+) -> dict[str, object]:
+    """Capture post-selector ru_maxrss with the platform's documented units."""
+
+    if resource is None:
+        raise T111ExecutionAuthorizationError(
+            "POSIX execution resource telemetry is unavailable"
+        )
+    raw_value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+        raise T111ExecutionAuthorizationError("ru_maxrss value is malformed")
+    if not math.isfinite(float(raw_value)) or raw_value < 0:
+        raise T111ExecutionAuthorizationError("ru_maxrss value is invalid")
+    if platform_name.startswith("linux"):
+        raw_unit = "KiB"
+        mib = float(raw_value) / 1024
+    elif platform_name == "darwin":
+        raw_unit = "bytes"
+        mib = float(raw_value) / (1024 * 1024)
+    else:
+        raise T111ExecutionAuthorizationError(
+            "ru_maxrss units are not defined for this execution platform"
+        )
+    return {
+        "process_peak_rss_mib": round(mib, 3),
+        "process_peak_rss_raw": raw_value,
+        "process_peak_rss_raw_unit": raw_unit,
+        "process_peak_rss_sample_phase": "after_selector_completion",
+        "process_peak_rss_source": "resource.getrusage(RUSAGE_SELF).ru_maxrss lifetime high-water mark",
+    }
+
+
 def _validate_attempt_jsonl_matches_cohort(
     *,
     attempts_path: Path,
@@ -773,7 +809,6 @@ def execute_t111_authorized_population(
         native_identity=validated["authorization"]["native_identity"],
     )
     started = time.monotonic()
-    process_resource = resource.getrusage(resource.RUSAGE_SELF)
     guard_snapshots = [active_guard]
 
     def retain_attempt(row: Mapping[str, object]) -> None:
@@ -813,6 +848,8 @@ def execute_t111_authorized_population(
             on_attempt=retain_attempt,
         )
         cohort = validate_t111_configured_search_cohort(cohort)
+        # Sample the process high-water mark only after selector completion.
+        process_peak_rss = _capture_process_peak_rss()
         cohort_ref = _write_new_json(output_root / "t111-cohort-admission.json", cohort)
         attempt_ref = {
             "path": str(attempts_path.resolve()),
@@ -855,7 +892,7 @@ def execute_t111_authorized_population(
                 "attempted_wall_clock_max_s": max(durations, default=0.0),
                 "attempted_wall_clock_min_s": min(durations, default=0.0),
                 "whole_selector_wall_clock_s": elapsed,
-                "process_peak_rss_mib": round(process_resource.ru_maxrss / 1024, 3),
+                **process_peak_rss,
                 "no_retry_attempt_count": sum(
                     row.get("failure_retry_status")
                     in {"failed_no_retry", "success_no_retry"}
