@@ -271,6 +271,69 @@ def _verify_file_binding(
     }
 
 
+def _verify_t088_gate_reference(
+    binding: Mapping[str, object], *, observed: Mapping[str, object], role: str
+) -> dict[str, object]:
+    """Normalize a T088 byte-count reference against its T101 binding.
+
+    T088's accepted input gate emits `byte_count`; T101 retention bindings use
+    `size_bytes`. The schema and all other identity fields remain exact, and
+    the referenced on-disk file is independently rehashed and stat-checked.
+    """
+
+    expected_schema = binding.get("schema_id")
+    expected_sha256 = binding.get("sha256")
+    expected_size = binding.get("size_bytes")
+    byte_count = observed.get("byte_count")
+    optional_size_bytes = observed.get("size_bytes")
+    observed_path_value = observed.get("path")
+    if (
+        not isinstance(expected_schema, str)
+        or observed.get("schema_id") != expected_schema
+        or not isinstance(expected_sha256, str)
+        or observed.get("sha256") != expected_sha256
+        or isinstance(expected_size, bool)
+        or not isinstance(expected_size, int)
+        or expected_size < 0
+        or isinstance(byte_count, bool)
+        or not isinstance(byte_count, int)
+        or byte_count < 0
+        or byte_count != expected_size
+        or (
+            "size_bytes" in observed
+            and (
+                isinstance(optional_size_bytes, bool)
+                or not isinstance(optional_size_bytes, int)
+                or optional_size_bytes != byte_count
+            )
+        )
+        or not isinstance(observed_path_value, str)
+        or not observed_path_value
+    ):
+        raise T111QualificationError(f"T088 gate identity differs for {role}")
+    verified = _verify_file_binding(binding, role=role)
+    observed_path = Path(observed_path_value)
+    try:
+        resolved_observed_path = observed_path.resolve(strict=True)
+        observed_size = resolved_observed_path.stat().st_size
+    except OSError as exc:
+        raise T111QualificationError(
+            f"T088 gate artifact path is unavailable: {role}"
+        ) from exc
+    if (
+        resolved_observed_path != Path(str(verified["resolved_path"]))
+        or observed_size != byte_count
+    ):
+        raise T111QualificationError(
+            f"T088 gate path or actual byte count differs for {role}"
+        )
+    return {
+        **dict(binding),
+        "resolved_path": str(resolved_observed_path),
+        "verification": "accepted_t088_gate_schema_sha256_path_and_size_match",
+    }
+
+
 def _verify_historical_manifest_blob(
     binding: Mapping[str, object], *, producer_commit: str, repo_root: Path
 ) -> dict[str, object]:
@@ -741,18 +804,9 @@ def prepare_t111_input_qualification_from_paths(
         try:
             if role in gate_references:
                 observed = gate_references[role]
-                if any(
-                    observed.get(key) != binding.get(key)
-                    for key in ("schema_id", "sha256", "size_bytes")
-                ):
-                    raise T111QualificationError(
-                        f"T087/T085 gate identity differs for {role}"
-                    )
-                verified_artifacts[role] = {
-                    **dict(binding),
-                    "resolved_path": observed.get("path"),
-                    "verification": "accepted_t088_gate_sha256_and_schema_match",
-                }
+                verified_artifacts[role] = _verify_t088_gate_reference(
+                    binding, observed=observed, role=role
+                )
             else:
                 verified_artifacts[role] = _verify_file_binding(binding, role=role)
         except (OSError, T111QualificationError) as exc:

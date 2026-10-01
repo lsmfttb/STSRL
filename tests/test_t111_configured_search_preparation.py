@@ -194,6 +194,88 @@ def test_t111_malformed_or_missing_restore_source_bindings_fail_closed(
         t111._t085_source_manifest_paths(restore_document)
 
 
+def _t088_gate_reference_fixture(tmp_path: Path):
+    path = tmp_path / "retained.json"
+    data = b"accepted retained artifact"
+    path.write_bytes(data)
+    binding = {
+        "path": str(path.resolve()),
+        "schema_id": "retained-fixture-v1",
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "size_bytes": len(data),
+    }
+    observed = {
+        "path": str(path.resolve()),
+        "schema_id": binding["schema_id"],
+        "sha256": binding["sha256"],
+        "byte_count": len(data),
+    }
+    return path, binding, observed
+
+
+def test_t111_t088_gate_byte_count_normalizes_to_exact_t101_size(tmp_path: Path):
+    _path, binding, observed = _t088_gate_reference_fixture(tmp_path)
+
+    verified = t111._verify_t088_gate_reference(
+        binding, observed=observed, role="t085_restore"
+    )
+
+    assert verified["size_bytes"] == observed["byte_count"]
+    assert verified["resolved_path"] == binding["path"]
+    assert (
+        verified["verification"]
+        == "accepted_t088_gate_schema_sha256_path_and_size_match"
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "byte_count_mismatch",
+        "malformed_byte_count",
+        "missing_byte_count",
+        "size_alias_mismatch",
+        "schema_mismatch",
+        "hash_mismatch",
+        "path_mismatch",
+    ],
+)
+def test_t111_t088_gate_reference_mismatch_fails_closed(tmp_path: Path, mutation: str):
+    _path, binding, observed = _t088_gate_reference_fixture(tmp_path)
+    if mutation == "byte_count_mismatch":
+        observed["byte_count"] += 1
+    elif mutation == "malformed_byte_count":
+        observed["byte_count"] = True
+    elif mutation == "missing_byte_count":
+        del observed["byte_count"]
+        observed["size_bytes"] = binding["size_bytes"]
+    elif mutation == "size_alias_mismatch":
+        observed["size_bytes"] = binding["size_bytes"] + 1
+    elif mutation == "schema_mismatch":
+        observed["schema_id"] = "unexpected-schema"
+    elif mutation == "hash_mismatch":
+        observed["sha256"] = "0" * 64
+    elif mutation == "path_mismatch":
+        other_path = tmp_path / "other-retained.json"
+        other_path.write_bytes(Path(str(binding["path"])).read_bytes())
+        observed["path"] = str(other_path.resolve())
+
+    with pytest.raises(t111.T111QualificationError):
+        t111._verify_t088_gate_reference(
+            binding, observed=observed, role="t085_restore"
+        )
+
+
+def test_t111_t088_gate_reference_rehashes_actual_file_size(tmp_path: Path):
+    path, binding, observed = _t088_gate_reference_fixture(tmp_path)
+    path.write_bytes(b"changed file contents and size")
+
+    with pytest.raises(t111.T111QualificationError):
+        t111._verify_t088_gate_reference(
+            binding, observed=observed, role="t085_restore"
+        )
+
+
 def test_t111_t101_terminal_gate_failure_writes_ineligible_artifact(
     monkeypatch, tmp_path: Path
 ):
