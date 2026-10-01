@@ -203,6 +203,8 @@ def validate_t107_mapping_diagnostic(
             raise ValueError("STSRL-009 classification counters are inconsistent")
 
     if diagnostic_status == "completed":
+        if v2 and legal_count == 0:
+            raise ValueError("STSRL-009 empty public action surface cannot complete")
         if legal_count != classified_count or edge_count != covered_count:
             raise ValueError("STSRL-008 completion did not map and cover all entries")
         return diagnostic

@@ -275,6 +275,47 @@ def test_diagnostic_v2_completed_counts_and_v1_are_separate():
         validate_t107_mapping_diagnostic(diagnostic, mapping_stage_status="completed")
 
 
+def test_v2_empty_surface_cannot_complete_without_reinterpreting_v1():
+    diagnostic = {
+        "schema_id": "native-root-occurrence-mapping-diagnostic-v2",
+        "status": "completed",
+        "mapping_subreason": "mapping_completed",
+        "public_legal_occurrence_count": 0,
+        "search_root_edge_count": 0,
+        "public_occurrences_mapped": 0,
+        "public_occurrences_classified": 0,
+        "searched_public_occurrence_count": 0,
+        "configuration_excluded_public_occurrence_count": 0,
+        "search_root_edges_covered": 0,
+        "direct_mapping_count": 0,
+        "mechanical_duplicate_mapping_count": 0,
+    }
+    with pytest.raises(ValueError, match="empty public action surface"):
+        validate_t107_mapping_diagnostic(diagnostic, mapping_stage_status="completed")
+    historical = {
+        key: value
+        for key, value in diagnostic.items()
+        if key
+        not in {
+            "public_occurrences_classified",
+            "searched_public_occurrence_count",
+            "configuration_excluded_public_occurrence_count",
+        }
+    }
+    historical["schema_id"] = "native-root-occurrence-mapping-diagnostic-v1"
+    assert (
+        validate_t107_mapping_diagnostic(historical, mapping_stage_status="completed")
+        == historical
+    )
+    diagnostic.update(
+        status="failed", mapping_subreason="no_public_legal_action_surface"
+    )
+    assert (
+        validate_t107_mapping_diagnostic(diagnostic, mapping_stage_status="failed")
+        == diagnostic
+    )
+
+
 def test_v2_failure_progress_counts_classified_exclusions_before_failed_occurrence():
     diagnostic = _diagnostic()
     diagnostic.update(
