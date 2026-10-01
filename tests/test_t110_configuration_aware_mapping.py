@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 from test_t099_particle_search_bridge import _action, _bridge_report
@@ -318,3 +319,41 @@ def test_stsr009_all_twelve_predicates_are_required():
             invalid = dict(audit, **{name: bad})
             with pytest.raises(ValueError):
                 validate_t110_configuration_mapping_audit(invalid)
+
+
+def test_runtime_identity_allowlist_accepts_only_named_pins(monkeypatch):
+    from sts_combat_rl.commands import t085_native_execution as runtime
+
+    pin = "6496fc1c7e629a374b72bd94f7fd29afe29c7f62"
+    assert runtime.T110_CONFIGURATION_MAPPING_NATIVE_IDENTITY["commit"] == pin
+    assert runtime.T085_NATIVE_IDENTITY["commit"] != pin
+    assert runtime.T107_ROOT_MAPPING_NATIVE_IDENTITY["commit"] == (
+        "1458522294d967e8985e1fd52cc15d7ebe7f2acd"
+    )
+
+    def manifest_for(commit):
+        return SimpleNamespace(
+            capability_ids={"native_battle_search_v2_tree_internal"},
+            integration=SimpleNamespace(
+                repository_url="https://github.com/lsmfttb/sts_lightspeed.git",
+                ref="refs/heads/stsrl/main",
+                commit=commit,
+            ),
+        )
+
+    for identity in runtime._T085_ACCEPTED_RUNTIME_IDENTITIES:
+        monkeypatch.setattr(
+            runtime,
+            "load_lightspeed_source_manifest",
+            lambda identity=identity: manifest_for(identity["commit"]),
+        )
+        assert runtime._validate_t085_native_source_manifest("battle_search_v2") == (
+            identity
+        )
+    monkeypatch.setattr(
+        runtime, "load_lightspeed_source_manifest", lambda: manifest_for("a" * 40)
+    )
+    with pytest.raises(
+        runtime.T085NativeExecutionError, match="accepted sts_lightspeed"
+    ):
+        runtime._validate_t085_native_source_manifest("battle_search_v2")

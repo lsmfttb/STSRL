@@ -109,7 +109,7 @@ def test_selected_cohort_validation_is_streaming_and_exact(tmp_path: Path) -> No
 def test_source_manifest_binds_t076_integration() -> None:
     manifest = verify_t076_source_manifest(Path(__file__).parents[1])
 
-    assert manifest["integration_commit"] == "1458522294d967e8985e1fd52cc15d7ebe7f2acd"
+    assert manifest["integration_commit"] == "6496fc1c7e629a374b72bd94f7fd29afe29c7f62"
     assert manifest["t076_lineage_anchor"] == T077_ACCEPTED_T076_INTEGRATION
     assert manifest["integration_branch"] == "stsrl/main"
 
@@ -122,6 +122,7 @@ def test_t077_source_manifest_boundary_keeps_historical_pins(
         "1555348535d66e3035aac80933a60949d4bd850f",
         "5afae22def0c69657b0139bfa21306aebac831af",
         "1458522294d967e8985e1fd52cc15d7ebe7f2acd",
+        "6496fc1c7e629a374b72bd94f7fd29afe29c7f62",
     )
 
     def manifest_for(commit: str) -> SimpleNamespace:
