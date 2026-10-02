@@ -70,6 +70,7 @@ class T111NativeRecordRunner:
         selected_records: Mapping[str, object],
         canonical_records_by_stratum: Mapping[str, Mapping[str, object]],
         native_identity: Mapping[str, object],
+        on_bridge_call: object | None = None,
     ) -> None:
         if not callable(adapter_factory) or not selected_records:
             raise ValueError("T111 native runner inputs are unavailable")
@@ -78,6 +79,9 @@ class T111NativeRecordRunner:
         self._adapter_factory = adapter_factory
         self._selected_records = selected_records
         self._canonical_records_by_stratum = canonical_records_by_stratum
+        if on_bridge_call is not None and not callable(on_bridge_call):
+            raise ValueError("bridge-call observer must be callable")
+        self._on_bridge_call = on_bridge_call
 
     @staticmethod
     def _predicates(**updates: bool | None) -> dict[str, bool | None]:
@@ -292,6 +296,8 @@ class T111NativeRecordRunner:
                 predicates=predicates,
             )
         try:
+            if self._on_bridge_call is not None:
+                self._on_bridge_call(identity)
             raw_report = bridge(
                 restored,
                 sampler_seed=seed,

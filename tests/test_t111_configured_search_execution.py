@@ -73,6 +73,7 @@ def _runner(
     report=None,
     bridge_exception=None,
     stage_trace=None,
+    on_bridge_call=None,
 ):
     seed = derive_t101_sampler_seed(identity, 0)
     expected_actions = _two_particle_report(seed)["anchor_ordered_public_legal_actions"]
@@ -124,6 +125,7 @@ def _runner(
         selected_records={identity: selected},
         canonical_records_by_stratum={"A": {identity: canonical}},
         native_identity=_NATIVE,
+        on_bridge_call=on_bridge_call,
     )
     record = {"selection_identity": identity, "cohort": "A"}
     return runner, record, adapter, restore_calls, restored
@@ -154,6 +156,18 @@ def test_t111_runner_restores_checks_parity_and_makes_one_frozen_bridge_call(
         "search_simulations": 400,
         "include_potions": False,
     }
+
+
+def test_t111_runner_bridge_observer_counts_only_actual_bridge_invocations(monkeypatch):
+    observed = []
+    runner, record, adapter, _restore_calls, _restored = _runner(
+        monkeypatch, on_bridge_call=observed.append
+    )
+
+    runner(record)
+
+    assert observed == [record["selection_identity"]]
+    assert len(adapter.bridge_calls) == 1
 
 
 def test_t111_runner_rejects_wrong_bridge_input_seed_from_native_bridge(monkeypatch):
