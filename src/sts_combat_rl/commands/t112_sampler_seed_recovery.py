@@ -1226,6 +1226,7 @@ def finalize_t112_witness(
         and isinstance(witness.get("retry_count"), int)
         and witness.get("retry_count") == 0
         and isinstance(witness.get("safe_seed_metadata"), Mapping)
+        and witness.get("failure_diagnostic") is None
         and guard.get("state") == "COMPLETED"
     )
     authorization_ref = _verify_ref(
