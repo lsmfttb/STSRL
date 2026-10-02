@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-10-01.
+Last updated: 2026-10-02.
 
 This is the compact, merge-stable projection of the accepted project state on
 `main`. It answers what is true now; it does not narrate a PR's approval or
@@ -213,6 +213,24 @@ its `PLAYER_NORMAL` public-action branch. This is not a game-mechanics defect,
 repair, or repair-efficacy result. No dynamic witness ran, and the repair
 architecture remains open. The separate 20 public-fidelity failures remain
 outside T109. See the [T109 static-analysis record](tasks/support/T109/static-analysis-record.md).
+
+T111 re-entered N=2 admission under the T110 configuration-aware bridge for the
+exact T101-ordered 413-candidate source population (A/B/C 93/192/128), with
+replicate 0, `particle_start=0`, unguided Search-v2@400, and
+`include_potions=false`. All three strata exhausted with 0/8 admissions. The
+retained structured exclusions are 385 strict T110-v2 bridge
+schema/classification failures (A/B/C 87/175/123), 8 searched-value
+unavailable/non-finite/unvisited cases (1/2/5), and 20 accepted structured
+bridge failures (5/15/0). Configuration-excluded public potion actions remain
+legality/parity evidence and were not assigned Search values or ranked; no
+admitted cohort or convergence result was produced. The terminal is
+`CONFIGURED_SEARCH_DOMAIN_SUPPORT_INSUFFICIENT`. No N>2 run, convergence,
+larger replay, native change, training, or promotion occurred. Planner selected
+a static-first audit of the dominant 385 validator-boundary exclusions as the
+next diagnostic direction; that direction does not authorize a replay. See the
+[T111 PR evidence](https://github.com/lsmfttb/STSRL/pull/129#issuecomment-5943751115)
+and [task archive](tasks/ARCHIVE.md) for the terminal record and retention
+manifest identity.
 
 The retained closed-route conclusions remain available through the task archive
 and contracts, including the earlier Oracle-guided Search, later-act reach,
