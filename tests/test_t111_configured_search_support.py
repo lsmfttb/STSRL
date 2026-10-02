@@ -31,13 +31,13 @@ _NATIVE = {
 def _two_particle_v2_report(seed: int = 17) -> dict[str, object]:
     report = _v2_report()
     first = report["particles"][0]
-    first["sampler_seed"] = seed
+    first["sampler_seed"] = 0xA5100000
     first["root_evaluation"]["simulations_requested"] = 400
     first["root_evaluation"]["root_visits"] = 800
     report["search_simulations"] = 400
     second = deepcopy(first)
     second["particle_index"] = 1
-    second["sampler_seed"] = seed
+    second["sampler_seed"] = 0xA5100001
     second["hidden_future_fingerprint"] = "second-private-fingerprint"
     report["particle_count"] = 2
     report["sampler_seed_input"] = seed
@@ -131,19 +131,61 @@ def test_t111_requires_finite_visited_value_for_every_searched_occurrence(field,
     assert error.value.reason == "searched_value_unavailable_nonfinite_or_unvisited"
 
 
-@pytest.mark.parametrize("particle_index", [None, 0, 1])
-def test_t111_checks_actual_bridge_and_each_particle_sampler_seed(particle_index):
+def test_t111_accepts_native_derived_particle_seeds_but_checks_bridge_input():
     report = _two_particle_v2_report(seed=derive_t101_sampler_seed("A:000", 0))
-    if particle_index is None:
-        report["sampler_seed_input"] += 1
-    else:
-        report["particles"][particle_index]["sampler_seed"] += 1
+    assert report["sampler_seed_input"] == derive_t101_sampler_seed("A:000", 0)
+    assert [particle["sampler_seed"] for particle in report["particles"]] == [
+        0xA5100000,
+        0xA5100001,
+    ]
+    assert all(
+        particle["sampler_seed"] != report["sampler_seed_input"]
+        for particle in report["particles"]
+    )
 
+    validate_t111_configured_search_report(
+        report, expected_sampler_seed=derive_t101_sampler_seed("A:000", 0)
+    )
+
+    report["sampler_seed_input"] += 1
     with pytest.raises(T111SupportExclusion) as error:
         validate_t111_configured_search_report(
             report,
             expected_sampler_seed=derive_t101_sampler_seed("A:000", 0),
         )
+    assert error.value.reason == "v2_bridge_schema_or_classification_failure"
+
+
+@pytest.mark.parametrize("invalid_seed", [None, True, "123"])
+def test_t111_keeps_per_particle_seed_metadata_strict(invalid_seed):
+    report = _two_particle_v2_report()
+    report["particles"][0]["sampler_seed"] = invalid_seed
+    with pytest.raises(T111SupportExclusion) as error:
+        validate_t111_configured_search_report(report, expected_sampler_seed=17)
+    assert error.value.reason == "v2_bridge_schema_or_classification_failure"
+
+
+def test_t111_rejects_missing_particle_seed_metadata():
+    report = _two_particle_v2_report()
+    del report["particles"][0]["sampler_seed"]
+    with pytest.raises(T111SupportExclusion) as error:
+        validate_t111_configured_search_report(report, expected_sampler_seed=17)
+    assert error.value.reason == "v2_bridge_schema_or_classification_failure"
+
+
+@pytest.mark.parametrize("mutate", ["bool", "missing", "reordered"])
+def test_t111_keeps_particle_indices_ordered_and_strict(mutate):
+    report = _two_particle_v2_report()
+    if mutate == "bool":
+        report["particles"][1]["particle_index"] = True
+    elif mutate == "missing":
+        del report["particles"][1]["particle_index"]
+    else:
+        report["particles"][0]["particle_index"] = 1
+        report["particles"][1]["particle_index"] = 0
+
+    with pytest.raises(T111SupportExclusion) as error:
+        validate_t111_configured_search_report(report, expected_sampler_seed=17)
     assert error.value.reason == "v2_bridge_schema_or_classification_failure"
 
 

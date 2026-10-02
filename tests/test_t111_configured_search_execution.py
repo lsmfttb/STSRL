@@ -32,12 +32,12 @@ _NATIVE = {
 def _two_particle_report(seed: int) -> dict[str, object]:
     report = _v2_report()
     first = report["particles"][0]
-    first["sampler_seed"] = seed
+    first["sampler_seed"] = 0xA5100000
     first["root_evaluation"]["simulations_requested"] = 400
     first["root_evaluation"]["root_visits"] = 800
     second = deepcopy(first)
     second["particle_index"] = 1
-    second["sampler_seed"] = seed
+    second["sampler_seed"] = 0xA5100001
     second["hidden_future_fingerprint"] = "second-fingerprint"
     report["search_simulations"] = 400
     report["sampler_seed_input"] = seed
@@ -156,18 +156,11 @@ def test_t111_runner_restores_checks_parity_and_makes_one_frozen_bridge_call(
     }
 
 
-@pytest.mark.parametrize("bad_seed_location", ["bridge", "particle0", "particle1"])
-def test_t111_runner_rejects_wrong_seed_returned_by_native_bridge(
-    monkeypatch, bad_seed_location
-):
+def test_t111_runner_rejects_wrong_bridge_input_seed_from_native_bridge(monkeypatch):
     identity = "A:fixture"
     seed = derive_t101_sampler_seed(identity, 0)
     report = _two_particle_report(seed)
-    if bad_seed_location == "bridge":
-        report["sampler_seed_input"] += 1
-    else:
-        index = 0 if bad_seed_location == "particle0" else 1
-        report["particles"][index]["sampler_seed"] += 1
+    report["sampler_seed_input"] += 1
     runner, record, adapter, _restore_calls, _restored = _runner(
         monkeypatch, identity=identity, report=report
     )
@@ -175,6 +168,24 @@ def test_t111_runner_rejects_wrong_seed_returned_by_native_bridge(
     with pytest.raises(T111SupportExclusion) as error:
         runner(record)
     assert error.value.reason == "v2_bridge_schema_or_classification_failure"
+    assert len(adapter.bridge_calls) == 1
+
+
+def test_t111_runner_accepts_valid_native_derived_particle_seed_metadata(monkeypatch):
+    identity = "A:fixture"
+    seed = derive_t101_sampler_seed(identity, 0)
+    report = _two_particle_report(seed)
+    runner, record, adapter, _restore_calls, _restored = _runner(
+        monkeypatch, identity=identity, report=report
+    )
+
+    result = runner(record)
+
+    assert result["bridge_report"]["sampler_seed_input"] == seed
+    assert [row["sampler_seed"] for row in result["bridge_report"]["particles"]] == [
+        0xA5100000,
+        0xA5100001,
+    ]
     assert len(adapter.bridge_calls) == 1
 
 

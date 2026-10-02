@@ -198,7 +198,9 @@ def _bridge(
         particles.append(
             {
                 "particle_index": particle_index,
-                "sampler_seed": seed,
+                # Synthetic native-style per-particle metadata: valid distinct
+                # values, without mirroring the native hiddenParticleSeed mix.
+                "sampler_seed": 0xA5100000 + particle_index,
                 "hidden_future_fingerprint": f"hidden-{seed}-{particle_index}",
                 "public_information_projection": projection,
                 "public_projection_equal": True,
@@ -322,13 +324,16 @@ def _source() -> list[dict[str, object]]:
 def _cohort() -> dict[str, object]:
     return select_t101_cohort(
         _source(),
-        admit=lambda _row: {
+        admit=lambda row: {
             "restore_exact_accepted_state": True,
             "public_projection_parity": True,
             "ordered_legal_action_parity": True,
             "occurrence_mapping_complete": True,
             "search_configuration_unchanged": True,
-            "bridge_report": _bridge(2),
+            "bridge_report": _bridge(
+                2,
+                seed=derive_t101_sampler_seed(row["selection_identity"], 0),
+            ),
             "bridge_call_runtime": _admission_runtime(),
             # Deliberately ignored by the selector.
             "outcome": "PLAYER_VICTORY",
@@ -476,13 +481,18 @@ def test_cohort_selection_is_deterministic_exact_8_each_and_value_blind() -> Non
     first = _cohort()
     second = select_t101_cohort(
         reversed(_source()),
-        admit=lambda _row: {
+        admit=lambda row: {
             "restore_exact_accepted_state": True,
             "public_projection_parity": True,
             "ordered_legal_action_parity": True,
             "occurrence_mapping_complete": True,
             "search_configuration_unchanged": True,
-            "bridge_report": _bridge(2, offset=-100.0, reverse=True),
+            "bridge_report": _bridge(
+                2,
+                seed=derive_t101_sampler_seed(row["selection_identity"], 0),
+                offset=-100.0,
+                reverse=True,
+            ),
             "bridge_call_runtime": _admission_runtime(),
             "outcome": "PLAYER_LOSS",
             "ranking": -999,
@@ -503,7 +513,10 @@ def test_cohort_selection_retains_exclusions_and_never_backfills_strata() -> Non
             "ordered_legal_action_parity": True,
             "occurrence_mapping_complete": True,
             "search_configuration_unchanged": True,
-            "bridge_report": _bridge(2),
+            "bridge_report": _bridge(
+                2,
+                seed=derive_t101_sampler_seed(row["selection_identity"], 0),
+            ),
             "bridge_call_runtime": _admission_runtime(),
         }
 
@@ -709,6 +722,28 @@ def test_selected_cohort_revalidates_persisted_admission_identity(
         validate_t101_selected_cohort(report)
 
 
+def test_selected_cohort_binds_bridge_input_to_identity_not_particle_seeds() -> None:
+    report = _cohort()
+    admitted = next(row for row in report["attempted"] if row["admitted"])
+    identity = admitted["selection_identity"]
+    structural = admitted["structural_evidence"]
+    bridge_report = structural["admission_bridge_report"]
+    assert bridge_report["sampler_seed_input"] == derive_t101_sampler_seed(identity, 0)
+    assert all(
+        particle["sampler_seed"] != bridge_report["sampler_seed_input"]
+        for particle in bridge_report["particles"]
+    )
+
+    bridge_report["sampler_seed_input"] += 1
+    canonical = __import__(
+        "sts_combat_rl.sim.t101_particle_convergence", fromlist=["_canonical_sha256"]
+    )._canonical_sha256
+    structural["bridge_report_sha256"] = canonical(bridge_report)
+
+    with pytest.raises(T101IncompleteError, match="sampler_seed_input"):
+        validate_t101_selected_cohort(report)
+
+
 def test_bridge_invocation_freezes_t099_nopot_search400_surface() -> None:
     calls: list[dict[str, object]] = []
 
@@ -723,6 +758,11 @@ def test_bridge_invocation_freezes_t099_nopot_search400_surface() -> None:
         particle_count=32,
     )
     assert report["particle_count"] == 32
+    assert report["sampler_seed_input"] == 123
+    assert [row["sampler_seed"] for row in report["particles"][:2]] == [
+        0xA5100000,
+        0xA5100001,
+    ]
     assert calls == [
         {
             "sampler_seed": 123,
@@ -733,10 +773,27 @@ def test_bridge_invocation_freezes_t099_nopot_search400_surface() -> None:
         }
     ]
 
-    changed_seed = _bridge(32, seed=123)
-    changed_seed["particles"][0]["sampler_seed"] = 124
-    with pytest.raises(T101IncompleteError, match="per-particle sampler seed"):
-        analyze_t101_batch(changed_seed)
+    derived_particle_seed = _bridge(32, seed=123)
+    derived_particle_seed["particles"][0]["sampler_seed"] = 124
+    assert analyze_t101_batch(derived_particle_seed, expected_sampler_seed=123)[
+        "particle_counts"
+    ] == [2, 4, 8, 16, 32]
+
+    wrong_bridge_input_report = _bridge(32, seed=124)
+    with pytest.raises(T101IncompleteError, match="sampler_seed_input"):
+        analyze_t101_batch(wrong_bridge_input_report, expected_sampler_seed=123)
+
+    def wrong_bridge_input(_snapshot: object, **kwargs: object) -> dict[str, object]:
+        report = _bridge(2, seed=int(kwargs["sampler_seed"]) + 1)
+        return report
+
+    with pytest.raises(T101IncompleteError, match="sampler_seed_input"):
+        call_t101_bridge(
+            SimpleNamespace(sample_hidden_future_particles_search=wrong_bridge_input),
+            object(),
+            sampler_seed=123,
+            particle_count=2,
+        )
 
     changed_root = _bridge(32, seed=123)
     changed_root["particles"][0]["root_evaluation"]["simulations_requested"] = 399

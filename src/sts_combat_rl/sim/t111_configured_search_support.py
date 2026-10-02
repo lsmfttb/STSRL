@@ -294,11 +294,10 @@ def validate_t111_configured_search_report(
                 "v2_bridge_schema_or_classification_failure",
                 evidence={"field": "particle"},
             )
-        if particle.get("sampler_seed") != expected_sampler_seed:
-            raise T111SupportExclusion(
-                "v2_bridge_schema_or_classification_failure",
-                evidence={"field": "particle_sampler_seed"},
-            )
+        # Strict T099 validation above requires a non-boolean integer seed and
+        # the requested ordered particle index.  The native-owned particle
+        # seed is derived from sampler_seed_input; only the bridge input is
+        # compared with the T101-derived expected seed here.
         views.append(_particle_search_view(particle))
 
     reference = views[0]
