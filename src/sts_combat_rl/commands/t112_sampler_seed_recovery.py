@@ -231,18 +231,25 @@ def _git_state(repo_root: Path) -> tuple[str, str, bool]:
 
 def _contract_is_ancestor(repo_root: Path, head: str) -> bool:
     try:
-        result = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", T112_APPROVED_SPEC_COMMIT, head],
-            cwd=repo_root,
-            capture_output=True,
-            check=False,
-            text=True,
+        # Use T111's Git adapter so WSL can resolve Windows-managed worktree
+        # .git pointers through the same narrow git.exe fallback as _git_state.
+        t111_preparation._git_output(
+            repo_root,
+            "merge-base",
+            "--is-ancestor",
+            T112_APPROVED_SPEC_COMMIT,
+            head,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise T112WorkflowError(
-            "cannot verify approved T112 contract ancestry"
-        ) from exc
-    return result.returncode == 0
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        t111_preparation.T111QualificationError,
+    ):
+        # Git uses status 1 for a non-ancestor (and higher values for errors).
+        # The shared adapter checks exit status and falls back only for a
+        # proven Windows-managed WSL worktree pointer; every failure is closed.
+        return False
+    return True
 
 
 def _verify_current_worktree(repo_root: Path, expected_head: str) -> dict[str, object]:

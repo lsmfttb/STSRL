@@ -152,6 +152,67 @@ def _insufficient_t111_and_t112():
     return selected, cohort, bridge_calls
 
 
+@pytest.mark.parametrize("merge_base_returncode", [0, 1])
+def test_t112_current_worktree_uses_wsl_windows_git_fallback_for_ancestry(
+    monkeypatch, tmp_path: Path, merge_base_returncode: int
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".git").write_text(
+        "gitdir: D:/DeadlyCatCoding/STSRL/.git/worktrees/STSRL-T112\n",
+        encoding="utf-8",
+    )
+    windows_root = "D:\\DeadlyCatCoding\\STSRL-T112"
+    head = "a" * 40
+    calls = []
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        if command[0] == "git":
+            raise workflow.t111_preparation.subprocess.CalledProcessError(128, command)
+        if command[:2] == ["wslpath", "-w"]:
+            return SimpleNamespace(stdout=f"{windows_root}\n")
+        if command[0] == "git.exe":
+            arguments = command[3:]
+            if arguments == ["rev-parse", "HEAD"]:
+                return SimpleNamespace(stdout=f"{head}\n")
+            if arguments == ["branch", "--show-current"]:
+                return SimpleNamespace(stdout=f"{workflow.T112_BRANCH}\n")
+            if arguments == ["status", "--porcelain"]:
+                return SimpleNamespace(stdout="")
+            if arguments == [
+                "merge-base",
+                "--is-ancestor",
+                workflow.T112_APPROVED_SPEC_COMMIT,
+                head,
+            ]:
+                if merge_base_returncode == 0:
+                    return SimpleNamespace(stdout="")
+                raise workflow.t111_preparation.subprocess.CalledProcessError(
+                    merge_base_returncode, command
+                )
+        raise AssertionError(f"unexpected subprocess command: {command!r}")
+
+    monkeypatch.setattr(workflow.t111_preparation.sys, "platform", "linux")
+    monkeypatch.setattr(workflow.t111_preparation.subprocess, "run", fake_run)
+
+    if merge_base_returncode == 0:
+        assert workflow._verify_current_worktree(repo_root, head) == {
+            "head": head,
+            "branch": workflow.T112_BRANCH,
+            "clean": True,
+        }
+    else:
+        with pytest.raises(T112WorkflowError):
+            workflow._verify_current_worktree(repo_root, head)
+
+    merge_calls = [
+        call for call in calls if call[0] == "git.exe" and "merge-base" in call
+    ]
+    assert len(merge_calls) == 1
+    assert merge_calls[0][2] == windows_root
+
+
 def test_t112_prebridge_exclusion_is_retained_and_recovery_continues():
     t111, cohort, call_counts = _recovered_t111_and_t112(
         prebridge_exclusion_limits={"A": 1}
