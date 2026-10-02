@@ -60,18 +60,28 @@ python -m sts_combat_rl.commands.t112_sampler_seed_recovery_cli witness
 
 The witness restores the deterministic first A-stratum identity in the
 already-qualified T101 selector order, derives its unchanged T101 bridge seed,
-and invokes the strict T111 native record runner once. It validates the actual
-report with the corrected strict validator, retains only bridge-input and
-indexed per-particle seed metadata plus report hash, and never enters the
-candidate selector. `finalize-witness` verifies the completed resource guard
-and emits the witness terminal. Candidate execution remains blocked unless
-that terminal is `ACCEPTED` with exactly one bridge call and zero retries.
-Witness artifacts use schema `t112-native-n2-witness-v2`. A typed
-`T111SupportExclusion` may additionally retain a `failure_diagnostic` containing
-only the T111 reason and whitelisted public boundary, structural predicates,
-and validated compact T105 stage summary. Arbitrary exception payloads and raw
-bridge reports are never retained; this diagnostic does not change rejection
-or terminal classification.
+and invokes the accepted native N=2 bridge exactly once through a seed-witness
+path. This path validates the actual report's exact `sampler_seed_input`, the
+two ordered particle indices, and strict non-boolean integer native-derived
+particle seed metadata. It does not call `T111NativeRecordRunner` or use full
+T111 support admission as the witness pass/fail predicate: that runner also
+checks unrelated support gates and cannot causally identify a seed-contract
+failure. The witness retains only the allowlisted seed/index metadata and
+report hash; it never enters the candidate selector. A passing witness proves
+only the seed contract under the pinned native source. It does not assert that
+the source is T111-admissible. The unchanged full T111 validator and support
+gates remain mandatory for every Stage-2 candidate.
+
+`finalize-witness` verifies the completed resource guard and emits the witness
+terminal. Candidate execution remains blocked unless that terminal is
+`ACCEPTED` with exactly one bridge call and zero retries. New witness artifacts
+use schema `t112-native-n2-witness-v3`; prior v1/v2 artifacts are not upgraded
+or reused for this gate. A typed `T111SupportExclusion`, if surfaced by witness
+plumbing, is classified as `N2_WITNESS_NON_SEED_SUPPORT_EXCLUSION`, never as a
+seed-contract failure, and cannot authorize cohort execution. It may retain a
+`failure_diagnostic` containing only the T111 reason and whitelisted public
+boundary, structural predicates, and validated compact T105 stage summary.
+Arbitrary exception payloads and raw bridge reports are never retained.
 
 ## Stage 2: separately authorized bounded cohort
 
@@ -113,9 +123,14 @@ the qualified T101/T111/native inputs.
 
 The only T112 scientific terminal values are:
 
-- `SAMPLER_SEED_CONTRACT_REPAIR_INVALID` (the witness failed its contract);
+- `SAMPLER_SEED_CONTRACT_REPAIR_INVALID` (a seed-specific contradiction or untrustworthy native/source evidence invalidated the witness);
 - `CONFIGURED_SEARCH_DOMAIN_SUPPORT_RECOVERED`;
 - `CONFIGURED_SEARCH_DOMAIN_SUPPORT_STILL_INSUFFICIENT`.
+
+`N2_WITNESS_NON_SEED_SUPPORT_EXCLUSION` is a completed Stage-1 witness result,
+not a T112 scientific terminal. It neither refutes nor passes the seed repair,
+and it does not authorize Stage 2. Keep the task at the witness gate until a
+renewed exact-head contract and authorization address the non-seed boundary.
 
 Missing, interrupted, contradictory, or unverified evidence is `INCOMPLETE`,
 not a scientific terminal. This implementation does not authorize executing

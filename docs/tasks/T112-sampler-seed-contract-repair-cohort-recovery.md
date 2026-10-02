@@ -105,8 +105,24 @@ Using the accepted native pin, run the smallest deterministic supported N=2 brid
 
 - the actual report's `sampler_seed_input` equals the requested bridge seed;
 - returned particle seeds are native-derived particle metadata rather than an echo requirement;
-- the corrected STSRL validator accepts that actual native report;
+- the witness strictly validates the two ordered particle indices and native-owned integer seed metadata without reimplementing native seed mixing;
 - no second attempt, retry, fallback, or reseed occurs.
+
+The Stage-1 witness is a causal test of the sampler-seed contract only. It must
+not call `T111NativeRecordRunner` or otherwise use full T111 support admission as
+the witness pass/fail predicate, because that runner can reject for unrelated
+restore, projection, action, search-value, coverage, or classification gates.
+The witness path validates the exact bridge input and native report seed/index
+metadata at the narrow boundary needed for this claim. This does not relax or
+replace any T099/T110/T111 validator: the full T111 configured-domain contract
+remains unchanged and applies to every candidate in the separately authorized
+Stage-2 selector.
+
+A typed `T111SupportExclusion` is a non-seed support result, never evidence of
+`SAMPLER_SEED_CONTRACT_REPAIR_INVALID`. If one is observed by witness plumbing,
+retain only the already-allowlisted diagnostic, classify it separately as
+`N2_WITNESS_NON_SEED_SUPPORT_EXCLUSION`, and do not authorize cohort execution.
+Missing or contradictory diagnostic/provenance is `INCOMPLETE`.
 
 One deterministic witness is enough. Do not run the 385 retained failures as a validation step.
 
@@ -171,7 +187,23 @@ T112 has only these scientific terminals:
 
 ### `SAMPLER_SEED_CONTRACT_REPAIR_INVALID`
 
-The proposed validator change cannot preserve the exact native/source/bridge contract, the deterministic native witness fails, artifact eligibility fails materially, or the repair requires an unauthorized native change. No cohort execution proceeds.
+Only a seed-contract-specific contradiction, or malformed/untrusted native or
+source evidence that prevents trusting the seed witness, supports this
+classification. A typed non-seed T111 support exclusion is not a seed-contract
+failure. No cohort execution proceeds.
+
+### Stage-1 witness result: `N2_WITNESS_NON_SEED_SUPPORT_EXCLUSION`
+
+The witness produced a typed non-seed T111 support exclusion without a
+seed-contract contradiction. This is a completed but non-passing Stage-1
+witness result, not a T112 scientific terminal and not evidence against the
+seed repair; no cohort execution proceeds. The T112 task remains at the witness
+gate until the cause is addressed under a renewed exact-head contract and
+authorization.
+
+The updated witness uses schema `t112-native-n2-witness-v3`. Earlier witness
+schemas and terminals remain historical evidence and must not be upgraded,
+rewritten, or used to satisfy the revised witness gate.
 
 ### `CONFIGURED_SEARCH_DOMAIN_SUPPORT_RECOVERED`
 
@@ -203,14 +235,16 @@ T112 passes only if:
 1. the false particle-seed-equals-bridge-seed invariant is removed from every active path that would govern T112/future convergence reuse;
 2. exact bridge input seed verification remains fail-closed;
 3. per-particle native seed metadata remains schema-validated without Python reimplementation of native mixing;
-4. a real exact-native N=2 witness passes the corrected validator;
-5. all T099/T110/T111 non-seed structural/scientific boundaries remain unchanged and tested;
-6. no native source change is made;
-7. no 385-case diagnostic census is run merely to reconfirm the bug;
-8. cohort recovery uses the exact source order and stops each stratum at first 8 or exhaustion;
-9. every newly executed candidate has exactly one N=2 bridge call with no retry/reseed;
-10. no N>2 convergence, training, promotion, complete-run evaluation, or unrelated failure-lane repair occurs;
-11. lifecycle/current-status records accurately state the terminal and the exact recovered/remaining support result before final dual acceptance.
+4. a real exact-native N=2 witness passes a seed-specific validator without invoking full T111 support admission;
+5. the witness proves only the seed contract and does not assert T111 support eligibility;
+6. tests prove a typed non-seed T111 exclusion is not classified as seed-invalid and cannot authorize Stage 2;
+7. all T099/T110/T111 non-seed structural/scientific boundaries remain unchanged and tested in their existing validator/selector paths;
+8. no native source change is made;
+9. no 385-case diagnostic census is run merely to reconfirm the bug;
+10. cohort recovery uses the exact source order and stops each stratum at first 8 or exhaustion;
+11. every newly executed candidate has exactly one N=2 bridge call with no retry/reseed;
+12. no N>2 convergence, training, promotion, complete-run evaluation, or unrelated failure-lane repair occurs;
+13. lifecycle/current-status records accurately state the terminal and the exact recovered/remaining support result before final dual acceptance.
 
 ## Planner Decision Boundary After T112
 
