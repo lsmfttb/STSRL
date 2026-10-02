@@ -46,15 +46,37 @@ def _two_particle_report(seed: int) -> dict[str, object]:
     return report
 
 
+def _adapter_actions(report):
+    return [
+        SimpleNamespace(
+            kind=action["kind"],
+            label=action["label"],
+            raw={
+                **{key: action[key] for key in ("scope", "idx1", "idx2", "idx3")},
+                "native_private": object(),
+            },
+        )
+        for action in report["anchor_ordered_public_legal_actions"]
+    ]
+
+
 class _FakeAdapter:
-    def __init__(self, report, *, bridge_exception=None, stage_trace=None):
+    def __init__(
+        self,
+        report,
+        *,
+        actions=None,
+        bridge_exception=None,
+        stage_trace=None,
+    ):
         self.report = report
+        self.actions = _adapter_actions(report) if actions is None else actions
         self.bridge_exception = bridge_exception
         self.stage_trace = stage_trace
         self.bridge_calls = []
 
     def legal_actions(self, _restored):
-        return ["native action object"]
+        return self.actions
 
     def sample_hidden_future_particles_search(self, snapshot, **kwargs):
         self.bridge_calls.append((snapshot, kwargs))
@@ -71,6 +93,8 @@ def _runner(
     *,
     identity="A:fixture",
     report=None,
+    adapter_actions=None,
+    context_candidate_actions=None,
     bridge_exception=None,
     stage_trace=None,
     on_bridge_call=None,
@@ -90,11 +114,16 @@ def _runner(
     )
     selected = SimpleNamespace(selection_identity=identity)
     canonical = SimpleNamespace(public_run_context=expected_context)
+    report = report or _two_particle_report(seed)
     adapter = _FakeAdapter(
-        report or _two_particle_report(seed),
+        report,
+        actions=adapter_actions,
         bridge_exception=bridge_exception,
         stage_trace=stage_trace,
     )
+    actual_context = dict(expected_context)
+    if context_candidate_actions is not None:
+        actual_context["candidate_actions"] = context_candidate_actions
     restore_calls = []
 
     monkeypatch.setattr(
@@ -118,7 +147,7 @@ def _runner(
     monkeypatch.setattr(
         execution,
         "build_public_run_context",
-        lambda *_args, **_kwargs: expected_context,
+        lambda *_args, **_kwargs: actual_context,
     )
     runner = execution.T111NativeRecordRunner(
         adapter_factory=lambda: adapter,
@@ -156,6 +185,69 @@ def test_t111_runner_restores_checks_parity_and_makes_one_frozen_bridge_call(
         "search_simulations": 400,
         "include_potions": False,
     }
+    assert (
+        execution._adapter_actions_as_public_identities(adapter.actions)
+        == result["bridge_report"]["anchor_ordered_public_legal_actions"]
+    )
+
+
+@pytest.mark.parametrize(
+    "drift",
+    ["ordinal", "kind", "idx", "label"],
+)
+def test_t111_runner_rejects_ordered_bridge_action_identity_drift(monkeypatch, drift):
+    report = _two_particle_report(derive_t101_sampler_seed("A:fixture", 0))
+    actions = _adapter_actions(report)
+    if drift == "ordinal":
+        actions[0], actions[1] = actions[1], actions[0]
+    elif drift == "kind":
+        actions[0] = SimpleNamespace(
+            kind="drifted-kind", label=actions[0].label, raw=actions[0].raw
+        )
+    elif drift == "idx":
+        raw = dict(actions[0].raw)
+        raw["idx1"] += 1
+        actions[0] = SimpleNamespace(
+            kind=actions[0].kind, label=actions[0].label, raw=raw
+        )
+    else:
+        actions[0] = SimpleNamespace(
+            kind=actions[0].kind,
+            label="drifted-label",
+            raw=actions[0].raw,
+        )
+    runner, record, adapter, _restore_calls, _restored = _runner(
+        monkeypatch, report=report, adapter_actions=actions
+    )
+
+    with pytest.raises(T111SupportExclusion) as error:
+        runner(record)
+
+    assert error.value.reason == "ordered_public_action_parity_failure"
+    assert (
+        error.value.evidence["boundary"] == "bridge_to_restored_ordered_action_parity"
+    )
+    assert (
+        error.value.evidence["structural_admission_predicates"][
+            "ordered_legal_action_parity"
+        ]
+        is False
+    )
+    assert len(adapter.bridge_calls) == 1
+
+
+def test_t111_t015_restored_context_candidate_parity_remains_strict(monkeypatch):
+    runner, record, adapter, _restore_calls, _restored = _runner(
+        monkeypatch,
+        context_candidate_actions=[{"availability": "available", "items": []}],
+    )
+
+    with pytest.raises(T111SupportExclusion) as error:
+        runner(record)
+
+    assert error.value.reason == "ordered_public_action_parity_failure"
+    assert error.value.evidence["boundary"] == "restored_ordered_action_parity"
+    assert adapter.bridge_calls == []
 
 
 def test_t111_runner_bridge_observer_counts_only_actual_bridge_invocations(monkeypatch):

@@ -56,6 +56,50 @@ def _exception_type(exc: BaseException) -> str:
     return type(exc).__name__[:120]
 
 
+def _adapter_actions_as_public_identities(
+    actions: Sequence[object],
+) -> list[dict[str, object]]:
+    """Project adapter actions onto T096/T099's public ordered identity shape.
+
+    The T015 restored-context ``candidate_actions`` value is a richer wrapper
+    and is checked separately above.  For bridge parity, use only the public
+    action fields emitted by the adapter; in particular, never serialize its
+    ``raw`` payload wholesale because it may contain native/private objects.
+    """
+
+    identities: list[dict[str, object]] = []
+    for action in actions:
+        raw = getattr(action, "raw", None)
+        kind = getattr(action, "kind", None)
+        label = getattr(action, "label", None)
+        if not isinstance(raw, Mapping):
+            raise TypeError("adapter action public fields are unavailable")
+        scope = raw.get("scope")
+        indices = [raw.get(key) for key in ("idx1", "idx2", "idx3")]
+        if (
+            not isinstance(scope, str)
+            or not isinstance(kind, str)
+            or not isinstance(label, str)
+            or "bits=" in label
+            or any(
+                not isinstance(index, int) or isinstance(index, bool)
+                for index in indices
+            )
+        ):
+            raise TypeError("adapter action public identity is malformed")
+        identities.append(
+            {
+                "scope": scope,
+                "kind": kind,
+                "idx1": indices[0],
+                "idx2": indices[1],
+                "idx3": indices[2],
+                "label": label,
+            }
+        )
+    return identities
+
+
 class T111NativeRecordRunner:
     """Restore one retained T101 occurrence and perform exactly one T110 call.
 
@@ -354,8 +398,20 @@ class T111NativeRecordRunner:
         predicates["search_edges_covered"] = True
         predicates["classification_and_partition_stable_across_particles"] = True
 
-        if raw_report.get("anchor_ordered_public_legal_actions") != actual_context.get(
-            "candidate_actions"
+        try:
+            adapter_public_actions = _adapter_actions_as_public_identities(actions)
+        except (TypeError, ValueError) as exc:
+            failed_predicates = dict(predicates)
+            failed_predicates["ordered_legal_action_parity"] = False
+            raise self._exclude(
+                "ordered_public_action_parity_failure",
+                boundary="bridge_to_restored_ordered_action_parity",
+                predicates=failed_predicates,
+                exc=exc,
+            ) from exc
+        if (
+            raw_report.get("anchor_ordered_public_legal_actions")
+            != adapter_public_actions
         ):
             failed_predicates = dict(predicates)
             failed_predicates["ordered_legal_action_parity"] = False
