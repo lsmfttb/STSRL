@@ -50,9 +50,11 @@ from sts_combat_rl.sim.t112_sampler_seed_recovery import (
     T112_TERMINALS,
     T112_WITNESS_SCHEMA,
     safe_t112_seed_metadata,
+    safe_t112_witness_failure_diagnostic,
     t112_cohort_from_t111,
     validate_t112_cohort,
     validate_t112_safe_seed_metadata,
+    validate_t112_witness_failure_diagnostic,
 )
 
 T112_QUALIFICATION_SCHEMA = "t112-input-qualification-v1"
@@ -1062,6 +1064,7 @@ def execute_t112_witness(
         "support_summary": None,
         "bridge_report_sha256": None,
         "failure_type": None,
+        "failure_diagnostic": None,
         "candidate_selector_invoked": False,
         "provenance": provenance,
     }
@@ -1111,6 +1114,10 @@ def execute_t112_witness(
         )
     except T111SupportExclusion as exc:
         witness_result["failure_type"] = type(exc).__name__
+        witness_result["failure_diagnostic"] = safe_t112_witness_failure_diagnostic(
+            reason=exc.reason,
+            evidence=exc.evidence,
+        )
     except Exception as exc:  # noqa: BLE001 - retain only safe type, not payload
         witness_result["failure_type"] = type(exc).__name__[:120]
     witness_result["bridge_call_count"] = bridge_call_counts.get(identity, 0)
@@ -1195,6 +1202,12 @@ def finalize_t112_witness(
         or witness.get("retry_count") != 0
     ):
         raise T112WorkflowError("T112 witness execution record is inconsistent")
+    failure_diagnostic = witness.get("failure_diagnostic")
+    if failure_diagnostic is not None:
+        try:
+            validate_t112_witness_failure_diagnostic(failure_diagnostic)
+        except ValueError as exc:
+            raise T112WorkflowError("T112 witness diagnostic is invalid") from exc
     _admission, guard = _validate_t112_guard_status(
         resource_status_path, execution_record=record
     )

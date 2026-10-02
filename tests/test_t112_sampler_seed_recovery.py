@@ -1018,3 +1018,190 @@ def test_t112_witness_is_exactly_one_call_and_cannot_fall_through_to_selector(
     assert witness["candidate_selector_invoked"] is False
     assert witness["witness_status"] == "ACCEPTED"
     assert "private-fingerprint-never-retained" not in str(witness)
+
+
+def test_t112_typed_witness_exclusion_retains_only_safe_diagnostic_and_rejects(
+    tmp_path, monkeypatch
+):
+    import json
+
+    from sts_combat_rl.sim.t105_native_stage_observability import TRACE_SCHEMA
+    from sts_combat_rl.sim.t111_configured_search_support import (
+        T111_STRUCTURAL_PREDICATES,
+    )
+    from sts_combat_rl.sim.t112_sampler_seed_recovery import (
+        T112_WITNESS_FAILURE_DIAGNOSTIC_SCHEMA,
+        T112_WITNESS_SCHEMA,
+    )
+
+    head = "f" * 40
+    auth_path = tmp_path / "authorization.json"
+    authorization = {
+        "schema_id": T112_AUTH_SCHEMA,
+        "stage": "witness",
+        "authorization_id": "witness-auth",
+        "implementation_head": head,
+    }
+    authorization_ref = workflow._write_new_json(auth_path, authorization)
+    identity = "A:typed-exclusion"
+    bridge_calls: dict[str, int] = {}
+
+    stage_summary = {
+        "schema_id": TRACE_SCHEMA,
+        "attempt_status": "failed_closed",
+        "first_failed_stage": "public_fidelity_validation",
+        "failure_code": "public_fidelity_failed",
+        "particle_failure_codes": [
+            {
+                "particle_index": 0,
+                "first_failed_stage": "public_fidelity_validation",
+                "failure_code": "public_fidelity_failed",
+            },
+            {
+                "particle_index": 1,
+                "first_failed_stage": "public_fidelity_validation",
+                "failure_code": "public_fidelity_failed",
+            },
+        ],
+    }
+    unsafe_markers = (
+        "private-hidden-particle-state",
+        "raw-native-report-secret",
+        "exception-message-secret",
+    )
+
+    def fake_validate(_authorization, **_kwargs):
+        return {
+            "authorization": {
+                **authorization,
+                "native_binary": {
+                    "path": "binary",
+                    "sha256": "e" * 64,
+                    "size_bytes": 1,
+                },
+            },
+            "authorization_sha256": authorization_ref["sha256"],
+            "authorization_artifact": authorization_ref,
+            "qualification_artifact": {"path": "qualification", "sha256": "b" * 64},
+            "readiness_artifact": {"path": "readiness", "sha256": "c" * 64},
+            "native_source_manifest_artifact": {"path": "manifest", "sha256": "d" * 64},
+            "native_binary": {"path": "binary", "sha256": "e" * 64, "size_bytes": 1},
+            "resource_plan": {
+                "resource_guard": {
+                    "batch_id": "batch",
+                    "job_id": "job",
+                    "resource_root": str(tmp_path),
+                }
+            },
+        }
+
+    def fake_runner_for(_validated, *, t101_manifest_path, bridge_call_counts):
+        assert t101_manifest_path == tmp_path / "t101.json"
+
+        def invoke(_source):
+            bridge_call_counts[identity] = bridge_call_counts.get(identity, 0) + 1
+            bridge_calls[identity] = bridge_calls.get(identity, 0) + 1
+            raise T111SupportExclusion(
+                "accepted_structured_bridge_failure",
+                evidence={
+                    "boundary": "single_n2_search_v2_bridge_call",
+                    "structural_admission_predicates": {
+                        "restore_exact_accepted_state": True,
+                        "public_projection_parity": False,
+                        "strict_t110_v2_bridge_valid": None,
+                        "unsafe_private_predicate": True,
+                    },
+                    "bridge_diagnostics": {
+                        "stage_diagnostics_status": "validated_failure",
+                        "structured_failure_class": "public_fidelity_failure",
+                        "structured_stage_evidence": stage_summary,
+                        "raw_report": unsafe_markers[1],
+                        "stage_diagnostics_error_type": unsafe_markers[0],
+                    },
+                    "hidden_state": unsafe_markers[0],
+                    "exception_text": unsafe_markers[2],
+                    "arbitrary_native_payload": {"secret": unsafe_markers[1]},
+                },
+            )
+
+        return (
+            [{"selection_identity": identity, "cohort": "A"}],
+            invoke,
+            [],
+            {"source_population": {"record_count": 413}},
+        )
+
+    monkeypatch.setattr(
+        workflow, "os", SimpleNamespace(name="posix", getpid=lambda: 321)
+    )
+    monkeypatch.setattr(workflow, "validate_t112_stage_authorization", fake_validate)
+    monkeypatch.setattr(
+        workflow, "_active_guard", lambda *_args, **_kwargs: {"state": "ARMED"}
+    )
+    monkeypatch.setattr(workflow, "_runner_for", fake_runner_for)
+    monkeypatch.setattr(
+        workflow,
+        "_validate_t112_guard_status",
+        lambda *_args, **_kwargs: (
+            {},
+            {
+                "state": "COMPLETED",
+                "sample_count": 1,
+                "peak_rss_mib": 1,
+                "lowest_memavailable_mib": 1,
+                "rss_limit_mib": 8192,
+                "memavailable_floor_mib": 8192,
+                "sample_interval_seconds": 1,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        workflow,
+        "select_t111_configured_search_cohort",
+        lambda *_args, **_kwargs: pytest.fail("witness must never invoke selector"),
+    )
+
+    result = workflow.execute_t112_witness(
+        authorization_path=auth_path,
+        qualification_path=tmp_path / "qualification.json",
+        readiness_path=tmp_path / "readiness.json",
+        resource_status_path=tmp_path / "resource-status.json",
+        t101_manifest_path=tmp_path / "t101.json",
+        witness_output_root=tmp_path / "witness-output",
+        repo_root=tmp_path,
+    )
+    finalized = workflow.finalize_t112_witness(
+        witness_output_root=tmp_path / "witness-output",
+        resource_status_path=tmp_path / "resource-status.json",
+    )
+    witness = json.loads(
+        Path(result["witness_artifact"]["path"]).read_text(encoding="utf-8")
+    )
+
+    assert bridge_calls == {identity: 1}
+    assert witness["schema_id"] == T112_WITNESS_SCHEMA
+    assert witness["witness_status"] == "REJECTED"
+    assert witness["bridge_call_count"] == 1
+    assert witness["retry_count"] == 0
+    assert witness["candidate_selector_invoked"] is False
+    diagnostic = witness["failure_diagnostic"]
+    assert diagnostic["schema_id"] == T112_WITNESS_FAILURE_DIAGNOSTIC_SCHEMA
+    assert diagnostic["reason"] == "accepted_structured_bridge_failure"
+    assert diagnostic["evidence"] == {
+        "boundary": "single_n2_search_v2_bridge_call",
+        "structural_admission_predicates": {
+            **dict.fromkeys(T111_STRUCTURAL_PREDICATES),
+            "restore_exact_accepted_state": True,
+            "public_projection_parity": False,
+        },
+        "bridge_diagnostics": {
+            "stage_diagnostics_status": "validated_failure",
+            "structured_failure_class": "public_fidelity_failure",
+            "structured_stage_evidence": stage_summary,
+        },
+    }
+    assert not any(marker in json.dumps(witness) for marker in unsafe_markers)
+    terminal = finalized["witness_terminal"]
+    assert terminal["witness_status"] == "REJECTED"
+    assert terminal["terminal_classification"] == "SAMPLER_SEED_CONTRACT_REPAIR_INVALID"
+    assert terminal["candidate_execution_authorized"] is False

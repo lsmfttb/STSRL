@@ -15,8 +15,19 @@ from sts_combat_rl.sim.t101_particle_convergence import (
     T101_SOURCE_COUNTS,
     derive_t101_sampler_seed,
 )
+from sts_combat_rl.sim.t105_native_stage_observability import (
+    FAILURE_CODES as T105_FAILURE_CODES,
+)
+from sts_combat_rl.sim.t105_native_stage_observability import (
+    STAGES_IN_EXECUTION_ORDER as T105_STAGES_IN_EXECUTION_ORDER,
+)
+from sts_combat_rl.sim.t105_native_stage_observability import (
+    TRACE_SCHEMA as T105_TRACE_SCHEMA,
+)
 from sts_combat_rl.sim.t111_configured_search_support import (
+    T111_EXCLUSION_REASONS,
     T111_NATIVE_REF,
+    T111_STRUCTURAL_PREDICATES,
     T111SupportExclusion,
     validate_t111_configured_search_cohort,
     validate_t111_configured_search_report,
@@ -40,7 +51,8 @@ T112_TERMINALS = frozenset(
 )
 T112_COHORT_SCHEMA = "t112-configured-search-cohort-admission-v2"
 T112_ATTEMPTS_SCHEMA = "t112-candidate-attempts-jsonl-v2"
-T112_WITNESS_SCHEMA = "t112-native-n2-witness-v1"
+T112_WITNESS_SCHEMA = "t112-native-n2-witness-v2"
+T112_WITNESS_FAILURE_DIAGNOSTIC_SCHEMA = "t112-native-n2-witness-failure-diagnostic-v1"
 T112_REPAIR_PROVENANCE_SCHEMA = "t112-validator-repair-provenance-v1"
 T112_BRIDGE_SCHEMA = "native-battle-public-particle-search-v2"
 T112_REPAIR_FACTS = {
@@ -84,6 +96,167 @@ _T112_POST_BRIDGE_EXCLUSION_BOUNDARIES = frozenset(
         "native_projection_canonical_payload_unavailable",
     }
 )
+_T112_WITNESS_EXCLUSION_BOUNDARIES = (
+    _T112_PRE_BRIDGE_EXCLUSION_BOUNDARIES | _T112_POST_BRIDGE_EXCLUSION_BOUNDARIES
+)
+_T112_STAGE_DIAGNOSTIC_STATUSES = frozenset(
+    {"unavailable", "invalid_or_unavailable", "validated_failure"}
+)
+
+
+def _safe_t112_stage_evidence(value: object) -> dict[str, object] | None:
+    """Filter T111's compact public summary of a validated T105 trace."""
+
+    expected_fields = {
+        "schema_id",
+        "attempt_status",
+        "first_failed_stage",
+        "failure_code",
+        "particle_failure_codes",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_fields:
+        return None
+    first_stage = value.get("first_failed_stage")
+    failure_code = value.get("failure_code")
+    particle_rows = value.get("particle_failure_codes")
+    if (
+        value.get("schema_id") != T105_TRACE_SCHEMA
+        or value.get("attempt_status") != "failed_closed"
+        or (
+            first_stage is not None
+            and (
+                not isinstance(first_stage, str)
+                or first_stage not in T105_STAGES_IN_EXECUTION_ORDER
+            )
+        )
+        or not isinstance(failure_code, str)
+        or failure_code not in T105_FAILURE_CODES
+        or not isinstance(particle_rows, list)
+        or len(particle_rows) != 2
+    ):
+        return None
+    safe_rows: list[dict[str, object]] = []
+    for index, row in enumerate(particle_rows):
+        if not isinstance(row, Mapping) or set(row) != {
+            "particle_index",
+            "first_failed_stage",
+            "failure_code",
+        }:
+            return None
+        row_stage = row.get("first_failed_stage")
+        row_code = row.get("failure_code")
+        if (
+            isinstance(row.get("particle_index"), bool)
+            or row.get("particle_index") != index
+            or (
+                row_stage is not None
+                and (
+                    not isinstance(row_stage, str)
+                    or row_stage not in T105_STAGES_IN_EXECUTION_ORDER
+                )
+            )
+            or (
+                row_code is not None
+                and (
+                    not isinstance(row_code, str) or row_code not in T105_FAILURE_CODES
+                )
+            )
+            or ((row_stage is None) != (row_code is None))
+        ):
+            return None
+        safe_rows.append(
+            {
+                "particle_index": index,
+                "first_failed_stage": row_stage,
+                "failure_code": row_code,
+            }
+        )
+    failed_rows = [row for row in safe_rows if row["first_failed_stage"] is not None]
+    if failed_rows:
+        if (
+            first_stage != failed_rows[0]["first_failed_stage"]
+            or failure_code != failed_rows[0]["failure_code"]
+        ):
+            return None
+    elif first_stage is not None or failure_code != "request_or_preflight_failure":
+        return None
+    return {
+        "schema_id": T105_TRACE_SCHEMA,
+        "attempt_status": "failed_closed",
+        "first_failed_stage": first_stage,
+        "failure_code": failure_code,
+        "particle_failure_codes": safe_rows,
+    }
+
+
+def safe_t112_witness_failure_diagnostic(
+    *, reason: object, evidence: object
+) -> dict[str, object] | None:
+    """Retain only typed T111 reasons and explicitly public diagnostic fields."""
+
+    if not isinstance(reason, str) or reason not in T111_EXCLUSION_REASONS:
+        return None
+    source = evidence if isinstance(evidence, Mapping) else {}
+    safe_evidence: dict[str, object] = {}
+    boundary = source.get("boundary")
+    if isinstance(boundary, str) and boundary in _T112_WITNESS_EXCLUSION_BOUNDARIES:
+        safe_evidence["boundary"] = boundary
+    predicates = source.get("structural_admission_predicates")
+    if isinstance(predicates, Mapping):
+        safe_predicates = {
+            name: value
+            for name in T111_STRUCTURAL_PREDICATES
+            if (value := predicates.get(name)) is None or type(value) is bool
+        }
+        if safe_predicates:
+            safe_evidence["structural_admission_predicates"] = safe_predicates
+    diagnostics = source.get("bridge_diagnostics")
+    if isinstance(diagnostics, Mapping):
+        safe_diagnostics: dict[str, object] = {}
+        diagnostic_status = diagnostics.get("stage_diagnostics_status")
+        stage_evidence = _safe_t112_stage_evidence(
+            diagnostics.get("structured_stage_evidence")
+        )
+        if (
+            isinstance(diagnostic_status, str)
+            and diagnostic_status in _T112_STAGE_DIAGNOSTIC_STATUSES
+            and (diagnostic_status != "validated_failure" or stage_evidence is not None)
+        ):
+            safe_diagnostics["stage_diagnostics_status"] = diagnostic_status
+        if (
+            diagnostics.get("structured_failure_class") == "public_fidelity_failure"
+            and stage_evidence is not None
+            and stage_evidence["first_failed_stage"] == "public_fidelity_validation"
+            and stage_evidence["failure_code"]
+            in {"public_fidelity_failed", "anchor_unsupported_fidelity"}
+        ):
+            safe_diagnostics["structured_failure_class"] = "public_fidelity_failure"
+        if stage_evidence is not None:
+            safe_diagnostics["structured_stage_evidence"] = stage_evidence
+        if safe_diagnostics:
+            safe_evidence["bridge_diagnostics"] = safe_diagnostics
+    return {
+        "schema_id": T112_WITNESS_FAILURE_DIAGNOSTIC_SCHEMA,
+        "reason": reason,
+        "evidence": safe_evidence,
+    }
+
+
+def validate_t112_witness_failure_diagnostic(value: object) -> dict[str, object]:
+    """Require witness diagnostics to be exactly the safe normalized schema."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema_id",
+        "reason",
+        "evidence",
+    }:
+        raise T112RecoveryError("T112 witness failure diagnostic is malformed")
+    normalized = safe_t112_witness_failure_diagnostic(
+        reason=value.get("reason"), evidence=value.get("evidence")
+    )
+    if normalized is None or dict(value) != normalized:
+        raise T112RecoveryError("T112 witness failure diagnostic is unsafe")
+    return normalized
 
 
 class T112RecoveryError(ValueError):
@@ -632,11 +805,14 @@ __all__ = [
     "T112_REPAIR_FACTS",
     "T112_REPAIR_PROVENANCE_SCHEMA",
     "T112_TERMINALS",
+    "T112_WITNESS_FAILURE_DIAGNOSTIC_SCHEMA",
     "T112_WITNESS_SCHEMA",
     "T112RecoveryError",
     "safe_t112_seed_metadata",
+    "safe_t112_witness_failure_diagnostic",
     "t112_cohort_from_t111",
     "t112_terminal_from_t111",
     "validate_t112_cohort",
     "validate_t112_safe_seed_metadata",
+    "validate_t112_witness_failure_diagnostic",
 ]

@@ -66,6 +66,12 @@ indexed per-particle seed metadata plus report hash, and never enters the
 candidate selector. `finalize-witness` verifies the completed resource guard
 and emits the witness terminal. Candidate execution remains blocked unless
 that terminal is `ACCEPTED` with exactly one bridge call and zero retries.
+Witness artifacts use schema `t112-native-n2-witness-v2`. A typed
+`T111SupportExclusion` may additionally retain a `failure_diagnostic` containing
+only the T111 reason and whitelisted public boundary, structural predicates,
+and validated compact T105 stage summary. Arbitrary exception payloads and raw
+bridge reports are never retained; this diagnostic does not change rejection
+or terminal classification.
 
 ## Stage 2: separately authorized bounded cohort
 
