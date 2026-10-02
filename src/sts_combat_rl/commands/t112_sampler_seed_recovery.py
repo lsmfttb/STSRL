@@ -1,9 +1,10 @@
 """T112 exact-head qualification, one-call witness, and bounded N=2 recovery.
 
-Preparation is simulator-free. The native witness and candidate selector are
-separate commands and require distinct Maintainer approval records plus an
-active detached resource guard. T111 validators/order/runner are reused, while
-all retained T112 outputs use T112-owned schemas and terminal labels.
+Preparation is simulator-free. The Stage-1 native witness and Stage-2
+candidate selector are separate commands and require distinct Maintainer
+approval records plus an active detached resource guard. Stage 1 uses a
+seed-only native bridge boundary; Stage 2 reuses T111 validators/order/runner.
+All retained T112 outputs use T112-owned schemas and terminal labels.
 """
 
 from __future__ import annotations
@@ -28,6 +29,9 @@ from sts_combat_rl.commands import (
 from sts_combat_rl.commands import (
     t111_configured_search_support as t111_preparation,
 )
+from sts_combat_rl.commands.t085_native_execution import (
+    restore_t085_canonical_record,
+)
 from sts_combat_rl.sim.t101_particle_convergence import (
     T101_SEARCH_SIMULATIONS,
     T101_SOURCE_COUNTS,
@@ -49,6 +53,9 @@ from sts_combat_rl.sim.t112_sampler_seed_recovery import (
     T112_TASK_ID,
     T112_TERMINALS,
     T112_WITNESS_SCHEMA,
+    T112_WITNESS_STAGE_OUTCOMES,
+    T112RecoveryError,
+    safe_t112_native_witness_seed_metadata,
     safe_t112_seed_metadata,
     safe_t112_witness_failure_diagnostic,
     t112_cohort_from_t111,
@@ -61,8 +68,8 @@ T112_QUALIFICATION_SCHEMA = "t112-input-qualification-v1"
 T112_PREPARATION_SCHEMA = "t112-readiness-preparation-v1"
 T112_PREPARATION_MANIFEST_SCHEMA = "t112-preparation-retention-manifest-v1"
 T112_AUTH_SCHEMA = "t112-maintainer-stage-authorization-v1"
-T112_WITNESS_RECORD_SCHEMA = "t112-native-witness-execution-record-v1"
-T112_WITNESS_TERMINAL_SCHEMA = "t112-native-witness-terminal-v1"
+T112_WITNESS_RECORD_SCHEMA = "t112-native-witness-execution-record-v2"
+T112_WITNESS_TERMINAL_SCHEMA = "t112-native-witness-terminal-v2"
 T112_EXECUTION_RECORD_SCHEMA = "t112-cohort-execution-record-v2"
 T112_FINAL_REPORT_SCHEMA = "t112-final-report-v2"
 T112_RETENTION_MANIFEST_SCHEMA = "t112-terminal-retention-manifest-v1"
@@ -823,6 +830,8 @@ def validate_t112_stage_authorization(
         )
         if (
             witness_terminal.get("witness_status") != "ACCEPTED"
+            or witness_terminal.get("stage_outcome")
+            != "N2_WITNESS_SEED_CONTRACT_ACCEPTED"
             or witness_terminal.get("terminal_classification") is not None
             or witness_terminal.get("implementation_head") != head
             or witness_terminal.get("approved_spec_commit") != T112_APPROVED_SPEC_COMMIT
@@ -830,7 +839,11 @@ def validate_t112_stage_authorization(
             or witness_terminal.get("native_binary") != dict(binary)
             or witness_terminal.get("native_source_manifest_artifact") != source_ref
             or witness_terminal.get("qualification_artifact") != qualification_ref
+            or isinstance(witness_terminal.get("bridge_call_count"), bool)
+            or not isinstance(witness_terminal.get("bridge_call_count"), int)
             or witness_terminal.get("bridge_call_count") != 1
+            or isinstance(witness_terminal.get("retry_count"), bool)
+            or not isinstance(witness_terminal.get("retry_count"), int)
             or witness_terminal.get("retry_count") != 0
             or witness_ref["sha256"] != value["witness_terminal_artifact"].get("sha256")
         ):
@@ -918,6 +931,36 @@ def _adapter_factory_for_binary(binary: Mapping[str, object]):
         return adapter
 
     return create, active
+
+
+def _call_t112_native_seed_witness(
+    *,
+    adapter: object,
+    selected_record: object,
+    canonical_records: Mapping[str, object],
+    sampler_seed_input: int,
+    on_bridge_call: object,
+) -> object:
+    """Restore one qualified source and make one bridge call without T111 admission."""
+
+    if not callable(on_bridge_call):
+        raise T112WorkflowError("T112 witness call observer is unavailable")
+    restored, _restore_method = restore_t085_canonical_record(
+        adapter, selected_record, canonical_records
+    )
+    bridge = getattr(adapter, "sample_hidden_future_particles_search", None)
+    if not callable(bridge):
+        raise T112RecoveryError("T112 witness native bridge API is unavailable")
+    on_bridge_call()
+    report = bridge(
+        restored,
+        sampler_seed=sampler_seed_input,
+        particle_start=0,
+        particle_count=2,
+        search_simulations=T101_SEARCH_SIMULATIONS,
+        include_potions=False,
+    )
+    return report
 
 
 def _runner_for(
@@ -1012,10 +1055,8 @@ def execute_t112_witness(
     )
     guard = _active_guard(validated, resource_status_path=resource_status_path)
     bridge_call_counts: dict[str, int] = {}
-    rows, runner, active, provenance = _runner_for(
-        validated,
-        t101_manifest_path=t101_manifest_path,
-        bridge_call_counts=bridge_call_counts,
+    rows, canonical_by_stratum, selected_records, provenance = _source_records_for_run(
+        validated, t101_manifest_path=t101_manifest_path
     )
     first_a = min(
         (row for row in rows if row.get("cohort", row.get("stratum")) == "A"),
@@ -1026,6 +1067,8 @@ def execute_t112_witness(
     )
     identity = str(first_a["selection_identity"])
     requested_seed = derive_t101_sampler_seed(identity, 0)
+    selected_record = selected_records.get(identity)
+    canonical_records = canonical_by_stratum.get("A")
     record = _base_execution_record(
         validated=validated,
         stage="witness",
@@ -1059,73 +1102,88 @@ def execute_t112_witness(
         "bridge_call_count": 0,
         "retry_count": 0,
         "witness_status": "REJECTED",
-        "validator": "validate_t111_configured_search_report",
+        "stage_outcome": "INCOMPLETE",
+        "validator": "safe_t112_native_witness_seed_metadata",
         "safe_seed_metadata": None,
-        "support_summary": None,
         "bridge_report_sha256": None,
+        "observed_sampler_seed_input": None,
         "failure_type": None,
         "failure_diagnostic": None,
         "candidate_selector_invoked": False,
         "provenance": provenance,
     }
     try:
+        if selected_record is None or not isinstance(canonical_records, Mapping):
+            raise T112WorkflowError("T112 witness source restore bindings are missing")
+        factory, active = _adapter_factory_for_binary(validated["native_binary"])
+        adapter = factory()
         try:
-            observed = runner(first_a)
+            report = _call_t112_native_seed_witness(
+                adapter=adapter,
+                selected_record=selected_record,
+                canonical_records=canonical_records,
+                sampler_seed_input=requested_seed,
+                on_bridge_call=lambda: bridge_call_counts.__setitem__(
+                    identity, bridge_call_counts.get(identity, 0) + 1
+                ),
+            )
         finally:
             if active:
                 active.pop().close()
-        report = observed.get("bridge_report")
-        summary = observed.get("support_summary")
-        if not isinstance(report, Mapping) or not isinstance(summary, Mapping):
-            raise T112WorkflowError(
-                "corrected T111 validator returned no report summary"
-            )
-        report_sha = str(summary.get("bridge_report_sha256", ""))
-        safe_seed = safe_t112_seed_metadata(
+        try:
+            report_digest = hashlib.sha256(_canonical_json(report)).hexdigest()
+        except (TypeError, ValueError) as exc:
+            raise T112RecoveryError(
+                "T112 witness report cannot be canonically hashed"
+            ) from exc
+        safe_seed = safe_t112_native_witness_seed_metadata(
             report,
             expected_sampler_seed=requested_seed,
-            bridge_report_sha256=report_sha,
+            bridge_report_sha256=report_digest,
         )
         witness_result.update(
             {
                 "witness_status": "ACCEPTED",
-                "observed_sampler_seed_input": report["sampler_seed_input"],
+                "stage_outcome": "N2_WITNESS_SEED_CONTRACT_ACCEPTED",
+                "observed_sampler_seed_input": report.get("sampler_seed_input"),
                 "safe_seed_metadata": safe_seed,
-                "support_summary": {
-                    "searched_occurrence_count_per_particle": summary[
-                        "searched_occurrence_count_per_particle"
-                    ],
-                    "configuration_excluded_occurrence_count_per_particle": summary[
-                        "configuration_excluded_occurrence_count_per_particle"
-                    ],
-                    "configured_search_decision_class_count": summary[
-                        "configured_search_decision_class_count"
-                    ],
-                    "searched_excluded_classification_and_partition_stable": summary[
-                        "searched_excluded_classification_and_partition_stable"
-                    ],
-                    "all_searched_occurrences_finite_and_visited": summary[
-                        "all_searched_occurrences_finite_and_visited"
-                    ],
-                    "all_search_edges_covered": summary["all_search_edges_covered"],
-                },
-                "bridge_report_sha256": report_sha,
+                "bridge_report_sha256": report_digest,
+            }
+        )
+    except T112RecoveryError as exc:
+        witness_result.update(
+            {
+                "failure_type": type(exc).__name__,
+                "stage_outcome": "SAMPLER_SEED_CONTRACT_REPAIR_INVALID",
             }
         )
     except T111SupportExclusion as exc:
-        witness_result["failure_type"] = type(exc).__name__
-        witness_result["failure_diagnostic"] = safe_t112_witness_failure_diagnostic(
+        diagnostic = safe_t112_witness_failure_diagnostic(
             reason=exc.reason,
             evidence=exc.evidence,
         )
+        witness_result.update(
+            {
+                "failure_type": type(exc).__name__,
+                "failure_diagnostic": diagnostic,
+                "stage_outcome": (
+                    "N2_WITNESS_NON_SEED_SUPPORT_EXCLUSION"
+                    if diagnostic is not None
+                    else "INCOMPLETE"
+                ),
+            }
+        )
     except Exception as exc:  # noqa: BLE001 - retain only safe type, not payload
-        witness_result["failure_type"] = type(exc).__name__[:120]
+        witness_result.update(
+            {"failure_type": type(exc).__name__[:120], "stage_outcome": "INCOMPLETE"}
+        )
     witness_result["bridge_call_count"] = bridge_call_counts.get(identity, 0)
     if witness_result["bridge_call_count"] != 1:
         witness_result["witness_status"] = "REJECTED"
+        witness_result["stage_outcome"] = "INCOMPLETE"
         witness_result["safe_seed_metadata"] = None
-        witness_result["support_summary"] = None
         witness_result["bridge_report_sha256"] = None
+        witness_result["observed_sampler_seed_input"] = None
     witness_result["wall_clock_time_s"] = max(0.0, time.monotonic() - started)
     witness_ref = _write_new_json(
         witness_output_root / "t112-native-witness.json", witness_result
@@ -1140,6 +1198,7 @@ def execute_t112_witness(
             "retry_count": 0,
             "witness_artifact": witness_ref,
             "witness_status": witness_result["witness_status"],
+            "stage_outcome": witness_result["stage_outcome"],
             "executor": {
                 "effective_worker_count": 1,
                 "shard_count": 1,
@@ -1189,6 +1248,8 @@ def finalize_t112_witness(
         or not isinstance(record.get("retry_count"), int)
         or record.get("retry_count") != 0
         or record.get("witness_artifact") != witness_ref
+        or record.get("witness_status") != witness.get("witness_status")
+        or record.get("stage_outcome") != witness.get("stage_outcome")
         or record.get("resource_guard_status_path")
         != str(resource_status_path.resolve())
         or witness.get("schema_id") != T112_WITNESS_SCHEMA
@@ -1203,29 +1264,56 @@ def finalize_t112_witness(
     ):
         raise T112WorkflowError("T112 witness execution record is inconsistent")
     failure_diagnostic = witness.get("failure_diagnostic")
+    diagnostic_valid = failure_diagnostic is None
     if failure_diagnostic is not None:
         try:
             validate_t112_witness_failure_diagnostic(failure_diagnostic)
-        except ValueError as exc:
-            raise T112WorkflowError("T112 witness diagnostic is invalid") from exc
+            diagnostic_valid = True
+        except ValueError:
+            diagnostic_valid = False
     _admission, guard = _validate_t112_guard_status(
         resource_status_path, execution_record=record
     )
+    requested_seed = witness.get("requested_sampler_seed_input")
+    observed_seed = witness.get("observed_sampler_seed_input")
+    report_sha = witness.get("bridge_report_sha256")
+    safe_metadata_valid = False
+    if (
+        isinstance(witness.get("safe_seed_metadata"), Mapping)
+        and isinstance(requested_seed, int)
+        and not isinstance(requested_seed, bool)
+        and isinstance(report_sha, str)
+    ):
+        try:
+            safe_metadata = validate_t112_safe_seed_metadata(
+                witness["safe_seed_metadata"],
+                expected_sampler_seed=requested_seed,
+                expected_bridge_report_sha256=report_sha,
+            )
+            safe_metadata_valid = dict(safe_metadata) == dict(
+                witness["safe_seed_metadata"]
+            )
+        except (TypeError, ValueError):
+            safe_metadata_valid = False
+    witness_stage_outcome = witness.get("stage_outcome")
     accepted = (
-        witness.get("witness_status") == "ACCEPTED"
+        witness_stage_outcome in T112_WITNESS_STAGE_OUTCOMES
+        and witness_stage_outcome == "N2_WITNESS_SEED_CONTRACT_ACCEPTED"
+        and witness.get("witness_status") == "ACCEPTED"
         and not isinstance(witness.get("bridge_call_count"), bool)
         and isinstance(witness.get("bridge_call_count"), int)
         and witness.get("bridge_call_count") == 1
-        and not isinstance(witness.get("requested_sampler_seed_input"), bool)
-        and isinstance(witness.get("requested_sampler_seed_input"), int)
-        and not isinstance(witness.get("observed_sampler_seed_input"), bool)
-        and isinstance(witness.get("observed_sampler_seed_input"), int)
-        and witness.get("observed_sampler_seed_input")
-        == witness.get("requested_sampler_seed_input")
+        and not isinstance(requested_seed, bool)
+        and isinstance(requested_seed, int)
+        and 0 <= requested_seed < 2**64
+        and not isinstance(observed_seed, bool)
+        and isinstance(observed_seed, int)
+        and observed_seed == requested_seed
         and not isinstance(witness.get("retry_count"), bool)
         and isinstance(witness.get("retry_count"), int)
         and witness.get("retry_count") == 0
-        and isinstance(witness.get("safe_seed_metadata"), Mapping)
+        and safe_metadata_valid
+        and diagnostic_valid
         and witness.get("failure_diagnostic") is None
         and guard.get("state") == "COMPLETED"
     )
@@ -1242,7 +1330,30 @@ def finalize_t112_witness(
         or authorization.get("implementation_head") != record.get("implementation_head")
     ):
         raise T112WorkflowError("T112 witness authorization binding changed")
-    terminal = None if accepted else "SAMPLER_SEED_CONTRACT_REPAIR_INVALID"
+    stage_outcome = witness_stage_outcome
+    if accepted:
+        stage_outcome = "N2_WITNESS_SEED_CONTRACT_ACCEPTED"
+    elif (
+        witness_stage_outcome == "SAMPLER_SEED_CONTRACT_REPAIR_INVALID"
+        and witness.get("failure_type") == "T112RecoveryError"
+        and witness.get("bridge_call_count") == 1
+        and diagnostic_valid
+    ):
+        stage_outcome = "SAMPLER_SEED_CONTRACT_REPAIR_INVALID"
+    elif (
+        witness_stage_outcome == "N2_WITNESS_NON_SEED_SUPPORT_EXCLUSION"
+        and witness.get("failure_type") == "T111SupportExclusion"
+        and failure_diagnostic is not None
+        and diagnostic_valid
+    ):
+        stage_outcome = "N2_WITNESS_NON_SEED_SUPPORT_EXCLUSION"
+    else:
+        stage_outcome = "INCOMPLETE"
+    terminal = (
+        "SAMPLER_SEED_CONTRACT_REPAIR_INVALID"
+        if stage_outcome == "SAMPLER_SEED_CONTRACT_REPAIR_INVALID"
+        else None
+    )
     terminal_doc = {
         "schema_id": T112_WITNESS_TERMINAL_SCHEMA,
         "task_id": T112_TASK_ID,
@@ -1258,6 +1369,7 @@ def finalize_t112_witness(
         "witness_execution_record": _artifact_ref(
             record_path, schema_id=T112_WITNESS_RECORD_SCHEMA
         ),
+        "stage_outcome": stage_outcome,
         "witness_status": "ACCEPTED" if accepted else "REJECTED",
         "terminal_classification": terminal,
         "bridge_call_count": witness.get("bridge_call_count"),
@@ -1711,6 +1823,7 @@ def finalize_t112_execution(
     )
     if (
         witness.get("witness_status") != "ACCEPTED"
+        or witness.get("stage_outcome") != "N2_WITNESS_SEED_CONTRACT_ACCEPTED"
         or isinstance(witness.get("bridge_call_count"), bool)
         or not isinstance(witness.get("bridge_call_count"), int)
         or witness.get("bridge_call_count") != 1
@@ -1737,7 +1850,9 @@ def finalize_t112_execution(
         != witness_authorization_ref.get("sha256")
         or witness_record.get("witness_artifact") != witness_artifact_ref
         or witness_record.get("witness_status") != "ACCEPTED"
+        or witness_record.get("stage_outcome") != "N2_WITNESS_SEED_CONTRACT_ACCEPTED"
         or witness_artifact.get("witness_status") != "ACCEPTED"
+        or witness_artifact.get("stage_outcome") != "N2_WITNESS_SEED_CONTRACT_ACCEPTED"
         or witness_artifact.get("bridge_call_count") != 1
         or witness_artifact.get("retry_count") != 0
     ):

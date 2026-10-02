@@ -11,7 +11,9 @@ import hashlib
 from collections import Counter
 from collections.abc import Mapping, Sequence
 
+from sts_combat_rl.sim.t099_particle_search_bridge import T110_BRIDGE_NATIVE_API
 from sts_combat_rl.sim.t101_particle_convergence import (
+    T101_SEARCH_SIMULATIONS,
     T101_SOURCE_COUNTS,
     derive_t101_sampler_seed,
 )
@@ -34,7 +36,7 @@ from sts_combat_rl.sim.t111_configured_search_support import (
 )
 
 T112_TASK_ID = "T112"
-T112_APPROVED_SPEC_COMMIT = "bd7a04a25bce2677c8dcf6a5e1c03751b43de90f"
+T112_APPROVED_SPEC_COMMIT = "2b45eab755ee0b528b7816d0f2b4089095c0776a"
 T112_NATIVE_COMMIT = "6496fc1c7e629a374b72bd94f7fd29afe29c7f62"
 T112_NATIVE_REF = T111_NATIVE_REF
 T112_NATIVE_IDENTITY = {
@@ -51,7 +53,7 @@ T112_TERMINALS = frozenset(
 )
 T112_COHORT_SCHEMA = "t112-configured-search-cohort-admission-v2"
 T112_ATTEMPTS_SCHEMA = "t112-candidate-attempts-jsonl-v2"
-T112_WITNESS_SCHEMA = "t112-native-n2-witness-v2"
+T112_WITNESS_SCHEMA = "t112-native-n2-witness-v3"
 T112_WITNESS_FAILURE_DIAGNOSTIC_SCHEMA = "t112-native-n2-witness-failure-diagnostic-v1"
 T112_REPAIR_PROVENANCE_SCHEMA = "t112-validator-repair-provenance-v1"
 T112_BRIDGE_SCHEMA = "native-battle-public-particle-search-v2"
@@ -101,6 +103,14 @@ _T112_WITNESS_EXCLUSION_BOUNDARIES = (
 )
 _T112_STAGE_DIAGNOSTIC_STATUSES = frozenset(
     {"unavailable", "invalid_or_unavailable", "validated_failure"}
+)
+T112_WITNESS_STAGE_OUTCOMES = frozenset(
+    {
+        "N2_WITNESS_SEED_CONTRACT_ACCEPTED",
+        "N2_WITNESS_NON_SEED_SUPPORT_EXCLUSION",
+        "SAMPLER_SEED_CONTRACT_REPAIR_INVALID",
+        "INCOMPLETE",
+    }
 )
 
 
@@ -331,6 +341,104 @@ def safe_t112_seed_metadata(
     }
     return validate_t112_safe_seed_metadata(
         safe,
+        expected_sampler_seed=expected_sampler_seed,
+        expected_bridge_report_sha256=bridge_report_sha256,
+    )
+
+
+def safe_t112_native_witness_seed_metadata(
+    report: object, *, expected_sampler_seed: int, bridge_report_sha256: str
+) -> dict[str, object]:
+    """Validate only the native bridge fields needed by the Stage-1 seed gate.
+
+    This deliberately does not run T111 configured-domain admission.  The
+    witness proves the requested bridge input and the native-owned, indexed
+    particle seed metadata; unrelated projection, action, mapping, and Search
+    support predicates remain Stage-2 responsibilities.
+    """
+
+    if not isinstance(report, Mapping):
+        raise T112RecoveryError("T112 witness report is not an object")
+    if (
+        report.get("schema_id") != T112_BRIDGE_SCHEMA
+        or report.get("native_api") != T110_BRIDGE_NATIVE_API
+        or report.get("information_regime")
+        != "normal_belief_search_outer_full_simulator_state_oracle_like_continuation"
+    ):
+        raise T112RecoveryError("T112 witness native report identity is invalid")
+    if (
+        isinstance(expected_sampler_seed, bool)
+        or not isinstance(expected_sampler_seed, int)
+        or not 0 <= expected_sampler_seed < 2**64
+        or isinstance(report.get("sampler_seed_input"), bool)
+        or not isinstance(report.get("sampler_seed_input"), int)
+        or report.get("sampler_seed_input") != expected_sampler_seed
+    ):
+        raise T112RecoveryError("T112 witness bridge input seed is invalid")
+    if (
+        isinstance(report.get("particle_start"), bool)
+        or not isinstance(report.get("particle_start"), int)
+        or report.get("particle_start") != 0
+        or isinstance(report.get("particle_count"), bool)
+        or not isinstance(report.get("particle_count"), int)
+        or report.get("particle_count") != 2
+        or isinstance(report.get("search_simulations"), bool)
+        or not isinstance(report.get("search_simulations"), int)
+        or report.get("search_simulations") != T101_SEARCH_SIMULATIONS
+        or report.get("include_potions") is not False
+    ):
+        raise T112RecoveryError("T112 witness frozen bridge configuration is invalid")
+    expected_semantics = {
+        "outer_particle_distribution": "native_public_consistent_hidden_future_sampler",
+        "continuation": "full_state_search_v2_per_particle",
+        "aggregation": "not_performed",
+        "q_public_claim": False,
+        "executable_no_sl_continuation_claim": False,
+        "information_set_optimal_claim": False,
+        "configuration_excluded_action_values": "not_evaluated_not_numeric",
+    }
+    semantics = report.get("semantic_boundary")
+    if (
+        not isinstance(semantics, Mapping)
+        or set(semantics) != set(expected_semantics)
+        or any(
+            type(semantics[key]) is not type(expected) or semantics[key] != expected
+            for key, expected in expected_semantics.items()
+        )
+    ):
+        raise T112RecoveryError("T112 witness native semantic boundary is invalid")
+    particles = report.get("particles")
+    if not isinstance(particles, list) or len(particles) != 2:
+        raise T112RecoveryError("T112 witness particle metadata is malformed")
+    if (
+        not isinstance(bridge_report_sha256, str)
+        or len(bridge_report_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in bridge_report_sha256)
+    ):
+        raise T112RecoveryError("T112 witness report hash is malformed")
+    safe_particles: list[dict[str, int]] = []
+    for expected_index, particle in enumerate(particles):
+        if not isinstance(particle, Mapping):
+            raise T112RecoveryError("T112 witness particle metadata is malformed")
+        index = particle.get("particle_index")
+        seed = particle.get("sampler_seed")
+        if (
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or index != expected_index
+            or isinstance(seed, bool)
+            or not isinstance(seed, int)
+            or not 0 <= seed < 2**64
+        ):
+            raise T112RecoveryError("T112 witness particle seed metadata is invalid")
+        safe_particles.append({"particle_index": index, "sampler_seed": seed})
+    return validate_t112_safe_seed_metadata(
+        {
+            "schema_id": T112_BRIDGE_SCHEMA,
+            "sampler_seed_input": expected_sampler_seed,
+            "bridge_report_sha256": bridge_report_sha256,
+            "particles": safe_particles,
+        },
         expected_sampler_seed=expected_sampler_seed,
         expected_bridge_report_sha256=bridge_report_sha256,
     )
@@ -807,7 +915,9 @@ __all__ = [
     "T112_TERMINALS",
     "T112_WITNESS_FAILURE_DIAGNOSTIC_SCHEMA",
     "T112_WITNESS_SCHEMA",
+    "T112_WITNESS_STAGE_OUTCOMES",
     "T112RecoveryError",
+    "safe_t112_native_witness_seed_metadata",
     "safe_t112_seed_metadata",
     "safe_t112_witness_failure_diagnostic",
     "t112_cohort_from_t111",

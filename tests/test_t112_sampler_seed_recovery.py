@@ -31,6 +31,7 @@ from sts_combat_rl.sim.t112_sampler_seed_recovery import (
     T112_REPAIR_FACTS,
     T112_REPAIR_PROVENANCE_SCHEMA,
     T112RecoveryError,
+    safe_t112_native_witness_seed_metadata,
     safe_t112_seed_metadata,
     t112_cohort_from_t111,
     validate_t112_cohort,
@@ -305,7 +306,7 @@ def test_t112_cohort_uses_t111_hash_order_first_eight_and_explicit_seed_semantic
 
     assert result["schema_id"] == T112_COHORT_SCHEMA
     assert result["task_id"] == "T112"
-    assert result["approved_spec_commit"] == "bd7a04a25bce2677c8dcf6a5e1c03751b43de90f"
+    assert result["approved_spec_commit"] == "2b45eab755ee0b528b7816d0f2b4089095c0776a"
     assert (
         result["terminal_classification"]
         == "CONFIGURED_SEARCH_DOMAIN_SUPPORT_RECOVERED"
@@ -409,6 +410,57 @@ def test_t112_safe_seed_metadata_rejects_wrong_bridge_or_particle_schema(mutatio
         )
 
 
+def test_t112_native_witness_validator_ignores_non_seed_t111_support_failure():
+    from sts_combat_rl.sim.t111_configured_search_support import (
+        validate_t111_configured_search_report,
+    )
+
+    expected = derive_t101_sampler_seed("A:fixture", 0)
+    report = _report(expected)
+    report["particles"][0]["root_rows"][0]["mean_value"] = None
+    with pytest.raises(T111SupportExclusion):
+        validate_t111_configured_search_report(report, expected_sampler_seed=expected)
+
+    metadata = safe_t112_native_witness_seed_metadata(
+        report,
+        expected_sampler_seed=expected,
+        bridge_report_sha256="c" * 64,
+    )
+    assert metadata["sampler_seed_input"] == expected
+    assert metadata["particles"] == [
+        {"particle_index": 0, "sampler_seed": 0xA5100000},
+        {"particle_index": 1, "sampler_seed": 0xA5100001},
+    ]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda report: report.update(sampler_seed_input=True),
+        lambda report: report.update(sampler_seed_input=0),
+        lambda report: report.update(schema_id="unknown"),
+        lambda report: report.update(native_api="wrong-native-api"),
+        lambda report: report.update(particle_start=True),
+        lambda report: report["particles"][0].update(particle_index=True),
+        lambda report: report["particles"].reverse(),
+        lambda report: report["particles"][1].update(sampler_seed=True),
+        lambda report: report["particles"][1].update(sampler_seed="native"),
+    ],
+)
+def test_t112_native_witness_validator_rejects_seed_or_native_identity_mutation(
+    mutation,
+):
+    expected = derive_t101_sampler_seed("A:fixture", 0)
+    report = _report(expected)
+    mutation(report)
+    with pytest.raises(T112RecoveryError):
+        safe_t112_native_witness_seed_metadata(
+            report,
+            expected_sampler_seed=expected,
+            bridge_report_sha256="c" * 64,
+        )
+
+
 def test_t112_bridge_seed_integer_mutation_fails_closed():
     expected = derive_t101_sampler_seed("A:fixture", 0)
     report = _report(expected)
@@ -501,7 +553,7 @@ def _qualification_and_readiness(tmp_path: Path, head: str):
         "schema_id": T112_REPAIR_PROVENANCE_SCHEMA,
         "task_id": "T112",
         "implementation_head": head,
-        "approved_spec_commit": "bd7a04a25bce2677c8dcf6a5e1c03751b43de90f",
+        "approved_spec_commit": "2b45eab755ee0b528b7816d0f2b4089095c0776a",
         "native_identity": T112_NATIVE_IDENTITY,
         **T112_REPAIR_FACTS,
     }
@@ -511,7 +563,7 @@ def _qualification_and_readiness(tmp_path: Path, head: str):
     qualification = {
         "schema_id": T112_QUALIFICATION_SCHEMA,
         "task_id": "T112",
-        "approved_spec_commit": "bd7a04a25bce2677c8dcf6a5e1c03751b43de90f",
+        "approved_spec_commit": "2b45eab755ee0b528b7816d0f2b4089095c0776a",
         "implementation_head": head,
         "implementation_worktree_path": str(tmp_path.resolve()),
         "validator_repair_provenance_artifact": repair_ref,
@@ -538,7 +590,7 @@ def _qualification_and_readiness(tmp_path: Path, head: str):
         "task_id": "T112",
         "preparation_only": True,
         "implementation_head": head,
-        "approved_spec_commit": "bd7a04a25bce2677c8dcf6a5e1c03751b43de90f",
+        "approved_spec_commit": "2b45eab755ee0b528b7816d0f2b4089095c0776a",
         "candidate_execution_started": False,
         "qualification_sha256": qualification_ref["sha256"],
         "validator_repair_provenance_artifact": repair_ref,
@@ -621,7 +673,7 @@ def _stage_authorization(
         },
         "implementation_worktree_path": str(tmp_path.resolve()),
         "implementation_head": head,
-        "approved_spec_commit": "bd7a04a25bce2677c8dcf6a5e1c03751b43de90f",
+        "approved_spec_commit": "2b45eab755ee0b528b7816d0f2b4089095c0776a",
         "qualification_artifact": qualification_ref,
         "readiness_artifact": readiness_ref,
         "native_identity": T112_NATIVE_IDENTITY,
@@ -743,7 +795,7 @@ def test_t112_preparation_binds_contract_head_and_explicitly_rejects_old_report_
     assert qualification["task_id"] == "T112"
     assert (
         qualification["approved_spec_commit"]
-        == "bd7a04a25bce2677c8dcf6a5e1c03751b43de90f"
+        == "2b45eab755ee0b528b7816d0f2b4089095c0776a"
     )
     assert qualification["implementation_head"] == head
     assert qualification["validator_repair_provenance_artifact"]["schema_id"] == (
@@ -829,7 +881,8 @@ def test_t112_stage_authorization_requires_independent_approved_witness_and_exac
         "schema_id": T112_WITNESS_TERMINAL_SCHEMA,
         "task_id": "T112",
         "implementation_head": head,
-        "approved_spec_commit": "bd7a04a25bce2677c8dcf6a5e1c03751b43de90f",
+        "approved_spec_commit": "2b45eab755ee0b528b7816d0f2b4089095c0776a",
+        "stage_outcome": "N2_WITNESS_SEED_CONTRACT_ACCEPTED",
         "native_identity": T112_NATIVE_IDENTITY,
         "native_binary": auth["native_binary"],
         "native_source_manifest_artifact": source_ref,
@@ -866,6 +919,40 @@ def test_t112_stage_authorization_requires_independent_approved_witness_and_exac
     )
     assert validated_cohort["witness_terminal"]["witness_status"] == "ACCEPTED"
 
+    nonseed_terminal = dict(witness_terminal)
+    nonseed_terminal.update(
+        {
+            "stage_outcome": "N2_WITNESS_NON_SEED_SUPPORT_EXCLUSION",
+            "witness_status": "REJECTED",
+        }
+    )
+    nonseed_path = tmp_path / "nonseed-witness-terminal.json"
+    nonseed_ref = workflow._write_new_json(nonseed_path, nonseed_terminal)
+    blocked_auth = _stage_authorization(
+        tmp_path,
+        stage="cohort",
+        head=head,
+        qualification_ref=qualification_ref,
+        readiness_ref=readiness_ref,
+        source_ref=source_ref,
+        binary_path=binary,
+        resource_status_path=tmp_path / "blocked-candidate-status.json",
+        witness_terminal_ref=nonseed_ref,
+    )
+    blocked_auth_path = tmp_path / "blocked-cohort-authorization.json"
+    workflow._write_new_json(blocked_auth_path, blocked_auth)
+    with pytest.raises(T112WorkflowError):
+        workflow.validate_t112_stage_authorization(
+            blocked_auth,
+            authorization_path=blocked_auth_path,
+            stage="cohort",
+            qualification_path=qualification_path,
+            readiness_path=readiness_path,
+            resource_status_path=tmp_path / "blocked-candidate-status.json",
+            repo_root=tmp_path,
+            witness_terminal_path=nonseed_path,
+        )
+
     rejected = dict(cohort_auth)
     rejected["implementation_head"] = "e" * 40
     with pytest.raises(T112WorkflowError):
@@ -889,7 +976,7 @@ def test_t112_repair_provenance_fails_closed_if_false_equality_returns(tmp_path)
         "schema_id": T112_REPAIR_PROVENANCE_SCHEMA,
         "task_id": "T112",
         "implementation_head": _HEAD,
-        "approved_spec_commit": "bd7a04a25bce2677c8dcf6a5e1c03751b43de90f",
+        "approved_spec_commit": "2b45eab755ee0b528b7816d0f2b4089095c0776a",
         "native_identity": T112_NATIVE_IDENTITY,
         **T112_REPAIR_FACTS,
     }
@@ -905,55 +992,53 @@ def test_t112_repair_provenance_fails_closed_if_false_equality_returns(tmp_path)
         )
 
 
-def test_t112_witness_is_exactly_one_call_and_cannot_fall_through_to_selector(
+def test_t112_witness_is_seed_only_one_call_and_never_uses_t111_runner_or_selector(
     tmp_path, monkeypatch
 ):
     head = "d" * 40
     auth_path = tmp_path / "authorization.json"
-    auth_path.write_text("{}\n", encoding="utf-8")
-    call_counts: dict[str, int] = {}
+    authorization = {
+        "schema_id": T112_AUTH_SCHEMA,
+        "stage": "witness",
+        "authorization_id": "witness-auth",
+        "implementation_head": head,
+    }
+    authorization_ref = workflow._write_new_json(auth_path, authorization)
     identity = "A:fixture"
     seed = derive_t101_sampler_seed(identity, 0)
     report = _report(seed)
-    from sts_combat_rl.sim.t111_configured_search_support import (
-        validate_t111_configured_search_report,
-    )
+    # The Stage-1 causal boundary deliberately ignores these T111 support
+    # details. The original T111 validator remains exercised by its own tests
+    # and by the separately authorized Stage-2 selector.
+    report["particles"][0]["root_rows"][0]["mean_value"] = None
+    bridge_calls = []
 
-    report_summary = validate_t111_configured_search_report(
-        report, expected_sampler_seed=seed
-    )
-    support = {
-        "bridge_report_sha256": report_summary["bridge_report_sha256"],
-        "searched_occurrence_count_per_particle": 3,
-        "configuration_excluded_occurrence_count_per_particle": 2,
-        "configured_search_decision_class_count": 2,
-        "searched_excluded_classification_and_partition_stable": True,
-        "all_searched_occurrences_finite_and_visited": True,
-        "all_search_edges_covered": True,
-    }
+    class Adapter:
+        def sample_hidden_future_particles_search(self, restored, **kwargs):
+            bridge_calls.append((restored, kwargs))
+            return report
 
-    class Runner:
-        def __call__(self, _source):
-            call_counts[identity] = call_counts.get(identity, 0) + 1
-            return {"bridge_report": report, "support_summary": support}
+        def close(self):
+            return None
 
-    def fake_runner_for(_validated, *, t101_manifest_path, bridge_call_counts):
+    adapter = Adapter()
+
+    def fake_source_records(_validated, *, t101_manifest_path):
         assert t101_manifest_path == tmp_path / "t101.json"
-
-        def invoke(source):
-            bridge_call_counts[identity] = bridge_call_counts.get(identity, 0) + 1
-            return Runner()(source)
-
         return (
             [{"selection_identity": identity, "cohort": "A"}],
-            invoke,
-            [],
+            {"A": {identity: object()}},
+            {identity: object()},
             {"source_population": {"record_count": 413}},
         )
+
+    def fake_factory(_binary):
+        return lambda: adapter, [adapter]
 
     def fake_validate(_auth, **_kwargs):
         return {
             "authorization": {
+                **authorization,
                 "authorization_id": "witness-auth",
                 "implementation_head": head,
                 "native_binary": {
@@ -962,8 +1047,8 @@ def test_t112_witness_is_exactly_one_call_and_cannot_fall_through_to_selector(
                     "size_bytes": 1,
                 },
             },
-            "authorization_sha256": "a" * 64,
-            "authorization_artifact": {"path": "authorization", "sha256": "a" * 64},
+            "authorization_sha256": authorization_ref["sha256"],
+            "authorization_artifact": authorization_ref,
             "qualification_artifact": {"path": "qualification", "sha256": "b" * 64},
             "readiness_artifact": {"path": "readiness", "sha256": "c" * 64},
             "native_source_manifest_artifact": {"path": "manifest", "sha256": "d" * 64},
@@ -980,16 +1065,39 @@ def test_t112_witness_is_exactly_one_call_and_cannot_fall_through_to_selector(
     monkeypatch.setattr(
         workflow, "os", SimpleNamespace(name="posix", getpid=lambda: 123)
     )
-    monkeypatch.setattr(workflow, "_read_json", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(workflow, "validate_t112_stage_authorization", fake_validate)
     monkeypatch.setattr(
         workflow, "_active_guard", lambda *_args, **_kwargs: {"state": "ARMED"}
     )
-    monkeypatch.setattr(workflow, "_runner_for", fake_runner_for)
+    monkeypatch.setattr(workflow, "_source_records_for_run", fake_source_records)
+    monkeypatch.setattr(workflow, "_adapter_factory_for_binary", fake_factory)
     monkeypatch.setattr(
         workflow,
-        "_base_execution_record",
-        lambda **_kwargs: {"target_pid": 123, "executor": {}},
+        "restore_t085_canonical_record",
+        lambda _adapter, _selected, _canonical: (object(), "mock_restore"),
+    )
+    monkeypatch.setattr(
+        workflow,
+        "_runner_for",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Stage-1 witness must not invoke T111NativeRecordRunner"
+        ),
+    )
+    monkeypatch.setattr(
+        workflow,
+        "_validate_t112_guard_status",
+        lambda *_args, **_kwargs: (
+            {},
+            {
+                "state": "COMPLETED",
+                "sample_count": 1,
+                "peak_rss_mib": 1,
+                "lowest_memavailable_mib": 1,
+                "rss_limit_mib": 8192,
+                "memavailable_floor_mib": 8192,
+                "sample_interval_seconds": 1,
+            },
+        ),
     )
     monkeypatch.setattr(
         workflow,
@@ -1006,21 +1114,48 @@ def test_t112_witness_is_exactly_one_call_and_cannot_fall_through_to_selector(
         witness_output_root=tmp_path / "witness-output",
         repo_root=tmp_path,
     )
+    finalized = workflow.finalize_t112_witness(
+        witness_output_root=tmp_path / "witness-output",
+        resource_status_path=tmp_path / "resource-status.json",
+    )
 
     import json
 
     witness = json.loads(
         Path(result["witness_artifact"]["path"]).read_text(encoding="utf-8")
     )
-    assert call_counts == {identity: 1}
+    assert len(bridge_calls) == 1
+    assert bridge_calls[0][1] == {
+        "sampler_seed": seed,
+        "particle_start": 0,
+        "particle_count": 2,
+        "search_simulations": 400,
+        "include_potions": False,
+    }
+    assert witness["schema_id"] == "t112-native-n2-witness-v3"
     assert witness["bridge_call_count"] == 1
     assert witness["retry_count"] == 0
     assert witness["candidate_selector_invoked"] is False
     assert witness["witness_status"] == "ACCEPTED"
+    assert witness["stage_outcome"] == "N2_WITNESS_SEED_CONTRACT_ACCEPTED"
+    assert "support_summary" not in witness
+    assert witness["safe_seed_metadata"]["particles"] == [
+        {"particle_index": 0, "sampler_seed": 0xA5100000},
+        {"particle_index": 1, "sampler_seed": 0xA5100001},
+    ]
+    assert all(
+        row["sampler_seed"] != seed
+        for row in witness["safe_seed_metadata"]["particles"]
+    )
     assert "private-fingerprint-never-retained" not in str(witness)
+    terminal = finalized["witness_terminal"]
+    assert terminal["witness_status"] == "ACCEPTED"
+    assert terminal["stage_outcome"] == "N2_WITNESS_SEED_CONTRACT_ACCEPTED"
+    assert terminal["terminal_classification"] is None
+    assert terminal["candidate_execution_authorized"] is False
 
 
-def test_t112_typed_witness_exclusion_retains_only_safe_diagnostic_and_rejects(
+def test_t112_typed_witness_exclusion_is_non_seed_outcome_and_cannot_open_stage_two(
     tmp_path, monkeypatch
 ):
     import json
@@ -1044,7 +1179,7 @@ def test_t112_typed_witness_exclusion_retains_only_safe_diagnostic_and_rejects(
     }
     authorization_ref = workflow._write_new_json(auth_path, authorization)
     identity = "A:typed-exclusion"
-    bridge_calls: dict[str, int] = {}
+    bridge_calls = []
 
     stage_summary = {
         "schema_id": TRACE_SCHEMA,
@@ -1095,12 +1230,18 @@ def test_t112_typed_witness_exclusion_retains_only_safe_diagnostic_and_rejects(
             },
         }
 
-    def fake_runner_for(_validated, *, t101_manifest_path, bridge_call_counts):
+    def fake_source_records(_validated, *, t101_manifest_path):
         assert t101_manifest_path == tmp_path / "t101.json"
+        return (
+            [{"selection_identity": identity, "cohort": "A"}],
+            {"A": {identity: object()}},
+            {identity: object()},
+            {"source_population": {"record_count": 413}},
+        )
 
-        def invoke(_source):
-            bridge_call_counts[identity] = bridge_call_counts.get(identity, 0) + 1
-            bridge_calls[identity] = bridge_calls.get(identity, 0) + 1
+    class Adapter:
+        def sample_hidden_future_particles_search(self, _restored, **_kwargs):
+            bridge_calls.append(identity)
             raise T111SupportExclusion(
                 "accepted_structured_bridge_failure",
                 evidence={
@@ -1124,12 +1265,13 @@ def test_t112_typed_witness_exclusion_retains_only_safe_diagnostic_and_rejects(
                 },
             )
 
-        return (
-            [{"selection_identity": identity, "cohort": "A"}],
-            invoke,
-            [],
-            {"source_population": {"record_count": 413}},
-        )
+        def close(self):
+            return None
+
+    adapter = Adapter()
+
+    def fake_factory(_binary):
+        return lambda: adapter, [adapter]
 
     monkeypatch.setattr(
         workflow, "os", SimpleNamespace(name="posix", getpid=lambda: 321)
@@ -1138,7 +1280,20 @@ def test_t112_typed_witness_exclusion_retains_only_safe_diagnostic_and_rejects(
     monkeypatch.setattr(
         workflow, "_active_guard", lambda *_args, **_kwargs: {"state": "ARMED"}
     )
-    monkeypatch.setattr(workflow, "_runner_for", fake_runner_for)
+    monkeypatch.setattr(workflow, "_source_records_for_run", fake_source_records)
+    monkeypatch.setattr(workflow, "_adapter_factory_for_binary", fake_factory)
+    monkeypatch.setattr(
+        workflow,
+        "restore_t085_canonical_record",
+        lambda _adapter, _selected, _canonical: (object(), "mock_restore"),
+    )
+    monkeypatch.setattr(
+        workflow,
+        "_runner_for",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Stage-1 witness must not invoke T111NativeRecordRunner"
+        ),
+    )
     monkeypatch.setattr(
         workflow,
         "_validate_t112_guard_status",
@@ -1178,9 +1333,10 @@ def test_t112_typed_witness_exclusion_retains_only_safe_diagnostic_and_rejects(
         Path(result["witness_artifact"]["path"]).read_text(encoding="utf-8")
     )
 
-    assert bridge_calls == {identity: 1}
+    assert bridge_calls == [identity]
     assert witness["schema_id"] == T112_WITNESS_SCHEMA
     assert witness["witness_status"] == "REJECTED"
+    assert witness["stage_outcome"] == "N2_WITNESS_NON_SEED_SUPPORT_EXCLUSION"
     assert witness["bridge_call_count"] == 1
     assert witness["retry_count"] == 0
     assert witness["candidate_selector_invoked"] is False
@@ -1203,5 +1359,6 @@ def test_t112_typed_witness_exclusion_retains_only_safe_diagnostic_and_rejects(
     assert not any(marker in json.dumps(witness) for marker in unsafe_markers)
     terminal = finalized["witness_terminal"]
     assert terminal["witness_status"] == "REJECTED"
-    assert terminal["terminal_classification"] == "SAMPLER_SEED_CONTRACT_REPAIR_INVALID"
+    assert terminal["stage_outcome"] == "N2_WITNESS_NON_SEED_SUPPORT_EXCLUSION"
+    assert terminal["terminal_classification"] is None
     assert terminal["candidate_execution_authorized"] is False
