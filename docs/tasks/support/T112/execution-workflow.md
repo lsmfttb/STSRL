@@ -2,7 +2,7 @@
 
 This is the STSRL-owned artifact workflow for T112 / PR #130. It is not an
 execution approval. The implementation is bound to contract commit
-`bd7a04a25bce2677c8dcf6a5e1c03751b43de90f`, the current clean T112 branch
+`2b45eab755ee0b528b7816d0f2b4089095c0776a`, the current clean T112 branch
 head, and native integration pin
 `6496fc1c7e629a374b72bd94f7fd29afe29c7f62`.
 
