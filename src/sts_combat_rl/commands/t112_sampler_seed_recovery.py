@@ -1676,6 +1676,48 @@ def _verify_jsonl_matches_t112_cohort(
         raise T112WorkflowError("T112 attempt JSONL and cohort differ")
 
 
+def _validate_t112_witness_first_a(
+    *,
+    witness_artifact: Mapping[str, object],
+    source_rows: list[dict[str, object]],
+) -> None:
+    """Bind the Stage-1 witness artifact to the Stage-2 T101 source reload."""
+
+    first_a = min(
+        (row for row in source_rows if row.get("cohort", row.get("stratum")) == "A"),
+        key=lambda row: (
+            hashlib.sha256(str(row["selection_identity"]).encode("utf-8")).hexdigest(),
+            str(row["selection_identity"]),
+        ),
+    )
+    expected_identity = str(first_a["selection_identity"])
+    expected_seed = derive_t101_sampler_seed(expected_identity, 0)
+    witness_identity = witness_artifact.get("source_identity")
+    safe_metadata = witness_artifact.get("safe_seed_metadata")
+    if (
+        not isinstance(witness_identity, Mapping)
+        or witness_identity.get("selection_identity") != expected_identity
+        or witness_identity.get("stratum") != "A"
+        or witness_identity.get("selection_digest")
+        != hashlib.sha256(expected_identity.encode("utf-8")).hexdigest()
+        or isinstance(witness_artifact.get("requested_sampler_seed_input"), bool)
+        or not isinstance(witness_artifact.get("requested_sampler_seed_input"), int)
+        or witness_artifact.get("requested_sampler_seed_input") != expected_seed
+        or isinstance(witness_artifact.get("observed_sampler_seed_input"), bool)
+        or not isinstance(witness_artifact.get("observed_sampler_seed_input"), int)
+        or witness_artifact.get("observed_sampler_seed_input") != expected_seed
+        or not isinstance(safe_metadata, Mapping)
+    ):
+        raise T112WorkflowError("T112 witness is not the deterministic first-A record")
+    validate_t112_safe_seed_metadata(
+        safe_metadata,
+        expected_sampler_seed=expected_seed,
+        expected_bridge_report_sha256=str(
+            witness_artifact.get("bridge_report_sha256", "")
+        ),
+    )
+
+
 def finalize_t112_execution(
     *, cohort_output_root: Path, resource_status_path: Path
 ) -> dict[str, object]:
@@ -1871,36 +1913,9 @@ def finalize_t112_execution(
         "source_population"
     ):
         raise T112WorkflowError("T112 source population changed before finalization")
-    first_a = min(
-        (row for row in source_rows if row.get("cohort", row.get("stratum")) == "A"),
-        key=lambda row: (
-            hashlib.sha256(str(row["selection_identity"]).encode("utf-8")).hexdigest(),
-            str(row["selection_identity"]),
-        ),
-    )
-    witness_identity = witness.get("source_identity")
-    expected_witness_identity = str(first_a["selection_identity"])
-    expected_witness_seed = derive_t101_sampler_seed(expected_witness_identity, 0)
-    safe_witness_metadata = witness.get("safe_seed_metadata")
-    if (
-        not isinstance(witness_identity, Mapping)
-        or witness_identity.get("selection_identity") != expected_witness_identity
-        or witness_identity.get("stratum") != "A"
-        or witness_identity.get("selection_digest")
-        != hashlib.sha256(expected_witness_identity.encode("utf-8")).hexdigest()
-        or isinstance(witness.get("requested_sampler_seed_input"), bool)
-        or not isinstance(witness.get("requested_sampler_seed_input"), int)
-        or witness.get("requested_sampler_seed_input") != expected_witness_seed
-        or isinstance(witness.get("observed_sampler_seed_input"), bool)
-        or not isinstance(witness.get("observed_sampler_seed_input"), int)
-        or witness.get("observed_sampler_seed_input") != expected_witness_seed
-        or not isinstance(safe_witness_metadata, Mapping)
-    ):
-        raise T112WorkflowError("T112 witness is not the deterministic first-A record")
-    validate_t112_safe_seed_metadata(
-        safe_witness_metadata,
-        expected_sampler_seed=expected_witness_seed,
-        expected_bridge_report_sha256=str(witness.get("bridge_report_sha256", "")),
+    _validate_t112_witness_first_a(
+        witness_artifact=witness_artifact,
+        source_rows=source_rows,
     )
     for stratum in T101_SOURCE_COUNTS:
         ordered_identities = sorted(

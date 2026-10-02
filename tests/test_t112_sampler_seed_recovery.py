@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -1362,3 +1363,69 @@ def test_t112_typed_witness_exclusion_is_non_seed_outcome_and_cannot_open_stage_
     assert terminal["stage_outcome"] == "N2_WITNESS_NON_SEED_SUPPORT_EXCLUSION"
     assert terminal["terminal_classification"] is None
     assert terminal["candidate_execution_authorized"] is False
+
+
+def test_t112_reloaded_source_order_revalidates_stage_one_witness_artifact():
+    from sts_combat_rl.sim.t112_sampler_seed_recovery import (
+        safe_t112_native_witness_seed_metadata,
+    )
+
+    # Stage 2's candidate JSONL records T101 hash order. A later independent
+    # source reload may enumerate those same source rows in another order.
+    reloaded_source_rows = [
+        {"selection_identity": "A:later", "cohort": "A"},
+        {"selection_identity": "C:only", "cohort": "C"},
+        {"selection_identity": "A:first", "cohort": "A"},
+        {"selection_identity": "B:only", "cohort": "B"},
+        {"selection_identity": "A:middle", "cohort": "A"},
+    ]
+    stage2_attempt_jsonl = [
+        {"selection_identity": row["selection_identity"], "stratum": "A"}
+        for row in sorted(
+            (row for row in reloaded_source_rows if row["cohort"] == "A"),
+            key=lambda row: (
+                hashlib.sha256(row["selection_identity"].encode("utf-8")).hexdigest(),
+                row["selection_identity"],
+            ),
+        )
+    ]
+    expected_first_a = stage2_attempt_jsonl[0]["selection_identity"]
+    seed = derive_t101_sampler_seed(expected_first_a, 0)
+    report = _report(seed)
+    report_sha = hashlib.sha256(workflow._canonical_json(report)).hexdigest()
+    witness_artifact = {
+        "source_identity": {
+            "selection_identity": expected_first_a,
+            "stratum": "A",
+            "selection_digest": hashlib.sha256(
+                expected_first_a.encode("utf-8")
+            ).hexdigest(),
+        },
+        "requested_sampler_seed_input": seed,
+        "observed_sampler_seed_input": seed,
+        "bridge_report_sha256": report_sha,
+        "safe_seed_metadata": safe_t112_native_witness_seed_metadata(
+            report,
+            expected_sampler_seed=seed,
+            bridge_report_sha256=report_sha,
+        ),
+    }
+    witness_terminal = {
+        "witness_status": "ACCEPTED",
+        "stage_outcome": "N2_WITNESS_SEED_CONTRACT_ACCEPTED",
+        "bridge_call_count": 1,
+        "retry_count": 0,
+    }
+
+    # Terminal metadata gates Stage 2 but intentionally does not duplicate
+    # source_identity or sampler evidence. Revalidating that document was the
+    # bug; the exact-hash-bound Stage-1 witness artifact carries those fields.
+    with pytest.raises(T112WorkflowError):
+        workflow._validate_t112_witness_first_a(
+            witness_artifact=witness_terminal,
+            source_rows=reloaded_source_rows,
+        )
+    workflow._validate_t112_witness_first_a(
+        witness_artifact=witness_artifact,
+        source_rows=reloaded_source_rows,
+    )
