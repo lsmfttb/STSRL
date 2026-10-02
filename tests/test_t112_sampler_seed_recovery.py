@@ -74,12 +74,22 @@ def _report(seed: int) -> dict[str, object]:
     return report
 
 
-def _recovered_t111_and_t112():
+def _recovered_t111_and_t112(*, prebridge_exclusion_limits=None):
     seed_metadata: dict[str, dict[str, object]] = {}
     call_counts: dict[str, int] = {}
+    prebridge_exclusion_limits = prebridge_exclusion_limits or {}
+    prebridge_seen: dict[str, int] = {}
 
     def admit(row):
         identity = row["selection_identity"]
+        stratum = row["cohort"]
+        seen = prebridge_seen.get(stratum, 0)
+        prebridge_seen[stratum] = seen + 1
+        if seen < prebridge_exclusion_limits.get(stratum, 0):
+            raise T111SupportExclusion(
+                "public_projection_parity_failure",
+                evidence={"boundary": "projection_candidate_parity"},
+            )
         call_counts[identity] = call_counts.get(identity, 0) + 1
         seed = derive_t101_sampler_seed(identity, 0)
         report = _report(seed)
@@ -124,7 +134,10 @@ def _insufficient_t111_and_t112():
         bridge_calls[identity] = bridge_calls.get(identity, 0) + 1
         raise T111SupportExclusion(
             "searched_value_unavailable_nonfinite_or_unvisited",
-            evidence={"field": "mean_value"},
+            evidence={
+                "boundary": "strict_t110_configured_search_validation",
+                "field": "mean_value",
+            },
         )
 
     selected = select_t111_configured_search_cohort(
@@ -137,6 +150,91 @@ def _insufficient_t111_and_t112():
         bridge_call_count_by_identity=bridge_calls,
     )
     return selected, cohort, bridge_calls
+
+
+def test_t112_prebridge_exclusion_is_retained_and_recovery_continues():
+    t111, cohort, call_counts = _recovered_t111_and_t112(
+        prebridge_exclusion_limits={"A": 1}
+    )
+
+    result = validate_t112_cohort(cohort)
+    first_a = next(row for row in result["attempted"] if row["stratum"] == "A")
+
+    assert (
+        result["terminal_classification"]
+        == "CONFIGURED_SEARCH_DOMAIN_SUPPORT_RECOVERED"
+    )
+    assert result["selected_counts"] == {"A": 8, "B": 8, "C": 8}
+    assert len(result["attempted"]) == 25
+    assert first_a["admitted"] is False
+    assert first_a["failure_retry_status"] == "failed_no_retry"
+    assert first_a["candidate_execution_started"] is False
+    assert first_a["native_bridge_call_count"] == 0
+    assert first_a["exclusion_reason"] == "public_projection_parity_failure"
+    assert first_a["exclusion_evidence"]["boundary"] == "projection_candidate_parity"
+    assert first_a["particle_sampler_seed_metadata"] == {
+        "schema_id": None,
+        "bridge_report_sha256": None,
+        "sampler_seed_input": None,
+        "particles": None,
+    }
+    attempts_jsonl_row = workflow._t112_attempt_row(
+        next(row for row in t111["attempted"] if row["stratum"] == "A"),
+        seed_metadata_by_identity={},
+        bridge_call_count_by_identity=call_counts,
+        shard={
+            "worker_id": "worker-0",
+            "shard_id": "shard-0",
+            "candidate_range": [0, 413],
+        },
+    )
+    assert attempts_jsonl_row["candidate_execution_started"] is False
+    assert attempts_jsonl_row["native_bridge_call_count"] == 0
+    assert (
+        attempts_jsonl_row["exclusion_evidence"]["boundary"]
+        == "projection_candidate_parity"
+    )
+    assert len(call_counts) == 24 and set(call_counts.values()) == {1}
+    assert t111["selected_counts"] == {"A": 8, "B": 8, "C": 8}
+    assert workflow._t112_exclusion_distributions(result["attempted"]) == (
+        {"public_projection_parity_failure": 1},
+        {"public_projection_parity_failure|projection_candidate_parity": 1},
+    )
+
+
+def test_t112_exhaustion_retains_prebridge_blocking_distribution():
+    _t111, cohort, call_counts = _recovered_t111_and_t112(
+        prebridge_exclusion_limits={"A": T101_SOURCE_COUNTS["A"]}
+    )
+
+    result = validate_t112_cohort(cohort)
+    a_rows = [row for row in result["attempted"] if row["stratum"] == "A"]
+    reason_counts, boundary_counts = workflow._t112_exclusion_distributions(
+        result["attempted"]
+    )
+
+    assert (
+        result["terminal_classification"]
+        == "CONFIGURED_SEARCH_DOMAIN_SUPPORT_STILL_INSUFFICIENT"
+    )
+    assert result["selected_counts"] == {"A": 0, "B": 8, "C": 8}
+    assert result["exhausted_strata"] == ["A"]
+    assert len(a_rows) == T101_SOURCE_COUNTS["A"]
+    assert all(
+        row["candidate_execution_started"] is False
+        and row["native_bridge_call_count"] == 0
+        and row["admitted"] is False
+        for row in a_rows
+    )
+    assert set(call_counts.values()) == {1}
+    assert reason_counts == {
+        "public_projection_parity_failure": T101_SOURCE_COUNTS["A"]
+    }
+    assert boundary_counts == {
+        "public_projection_parity_failure|projection_candidate_parity": T101_SOURCE_COUNTS[
+            "A"
+        ]
+    }
 
 
 def test_t112_cohort_uses_t111_hash_order_first_eight_and_explicit_seed_semantics():
@@ -276,12 +374,46 @@ def test_t112_cohort_rejects_attempt_after_eighth_success():
         validate_t112_cohort(cohort)
 
 
-@pytest.mark.parametrize("bridge_call_count", [0, 2, True])
-def test_t112_cohort_rejects_candidate_without_exactly_one_native_call(
-    bridge_call_count,
+@pytest.mark.parametrize(
+    ("bridge_call_count", "candidate_execution_started"),
+    [(2, True), (True, True), (0, True), (1, False)],
+)
+def test_t112_cohort_rejects_impossible_bridge_boundary_combinations(
+    bridge_call_count, candidate_execution_started
 ):
     _t111, cohort, _calls = _recovered_t111_and_t112()
     cohort["attempted"][0]["native_bridge_call_count"] = bridge_call_count
+    cohort["attempted"][0]["candidate_execution_started"] = candidate_execution_started
+
+    with pytest.raises(T112RecoveryError):
+        validate_t112_cohort(cohort)
+
+
+@pytest.mark.parametrize(
+    ("bridge_call_count", "candidate_execution_started", "boundary"),
+    [
+        (0, False, "single_n2_search_v2_bridge_call"),
+        (1, True, "projection_candidate_parity"),
+        (0, False, "unrecognized_boundary"),
+    ],
+)
+def test_t112_cohort_rejects_impossible_exclusion_boundary_call_pairs(
+    bridge_call_count, candidate_execution_started, boundary
+):
+    _t111, cohort, _calls = _recovered_t111_and_t112()
+    row = cohort["attempted"][0]
+    row["admitted"] = False
+    row["failure_retry_status"] = "failed_no_retry"
+    row["native_bridge_call_count"] = bridge_call_count
+    row["candidate_execution_started"] = candidate_execution_started
+    row["exclusion_reason"] = "restore_or_provenance_incompatible"
+    row["exclusion_evidence"] = {"boundary": boundary}
+    row["particle_sampler_seed_metadata"] = {
+        "schema_id": None,
+        "bridge_report_sha256": None,
+        "sampler_seed_input": None,
+        "particles": None,
+    }
 
     with pytest.raises(T112RecoveryError):
         validate_t112_cohort(cohort)

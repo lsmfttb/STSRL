@@ -38,8 +38,8 @@ T112_TERMINALS = frozenset(
         "CONFIGURED_SEARCH_DOMAIN_SUPPORT_STILL_INSUFFICIENT",
     }
 )
-T112_COHORT_SCHEMA = "t112-configured-search-cohort-admission-v1"
-T112_ATTEMPTS_SCHEMA = "t112-candidate-attempts-jsonl-v1"
+T112_COHORT_SCHEMA = "t112-configured-search-cohort-admission-v2"
+T112_ATTEMPTS_SCHEMA = "t112-candidate-attempts-jsonl-v2"
 T112_WITNESS_SCHEMA = "t112-native-n2-witness-v1"
 T112_REPAIR_PROVENANCE_SCHEMA = "t112-validator-repair-provenance-v1"
 T112_BRIDGE_SCHEMA = "native-battle-public-particle-search-v2"
@@ -58,6 +58,32 @@ T112_REPAIR_FACTS = {
         "historical_artifacts_rewritten": False,
     },
 }
+
+# T111's observer fires immediately before the native bridge invocation. These
+# reviewed boundary names therefore distinguish valid zero-call source/support
+# exclusions from exclusions produced after the one allowed bridge call.
+_T112_PRE_BRIDGE_EXCLUSION_BOUNDARIES = frozenset(
+    {
+        "accepted_t085_source_binding",
+        "exact_t085_restore",
+        "accepted_public_context_binding",
+        "public_projection_observation",
+        "projection_candidate_parity",
+        "public_context_construction",
+        "restored_public_context_parity",
+        "restored_ordered_action_parity",
+        "bridge_api_precondition",
+    }
+)
+_T112_POST_BRIDGE_EXCLUSION_BOUNDARIES = frozenset(
+    {
+        "single_n2_search_v2_bridge_call",
+        "strict_t110_configured_search_validation",
+        "bridge_to_restored_ordered_action_parity",
+        "bridge_to_restored_projection_parity",
+        "native_projection_canonical_payload_unavailable",
+    }
+)
 
 
 class T112RecoveryError(ValueError):
@@ -263,6 +289,7 @@ def t112_cohort_from_t111(
         copied["native_bridge_call_count"] = bridge_call_counts.get(
             str(copied.get("selection_identity")), 0
         )
+        copied["candidate_execution_started"] = copied["native_bridge_call_count"] == 1
         t112_selected.append(copied)
     t112_attempts: list[dict[str, object]] = []
     for row in attempted:
@@ -287,6 +314,7 @@ def t112_cohort_from_t111(
             )
         )
         copied["native_bridge_call_count"] = bridge_call_counts.get(identity, 0)
+        copied["candidate_execution_started"] = copied["native_bridge_call_count"] == 1
         t112_attempts.append(copied)
     return {
         "schema_id": T112_COHORT_SCHEMA,
@@ -402,6 +430,7 @@ def validate_t112_cohort(value: object) -> dict[str, object]:
         seed = row.get("sampler_seed_input")
         selection_digest = row.get("selection_digest")
         bridge_call_count = row.get("native_bridge_call_count")
+        execution_started = row.get("candidate_execution_started")
         if (
             not isinstance(identity, str)
             or not identity
@@ -427,9 +456,32 @@ def validate_t112_cohort(value: object) -> dict[str, object]:
             != (row.get("failure_retry_status") == "success_no_retry")
             or isinstance(bridge_call_count, bool)
             or not isinstance(bridge_call_count, int)
-            or bridge_call_count != 1
+            or bridge_call_count not in {0, 1}
+            or not isinstance(execution_started, bool)
+            or execution_started is not (bridge_call_count == 1)
         ):
             raise T112RecoveryError("T112 attempt identity/seed/retry evidence invalid")
+        if row.get("admitted") is True:
+            if bridge_call_count != 1 or execution_started is not True:
+                raise T112RecoveryError(
+                    "T112 admitted candidate did not execute one bridge call"
+                )
+        else:
+            exclusion_evidence = row.get("exclusion_evidence")
+            boundary = (
+                exclusion_evidence.get("boundary")
+                if isinstance(exclusion_evidence, Mapping)
+                else None
+            )
+            allowed_boundaries = (
+                _T112_PRE_BRIDGE_EXCLUSION_BOUNDARIES
+                if bridge_call_count == 0
+                else _T112_POST_BRIDGE_EXCLUSION_BOUNDARIES
+            )
+            if boundary not in allowed_boundaries:
+                raise T112RecoveryError(
+                    "T112 exclusion boundary disagrees with bridge-call count"
+                )
         attempted_ids.add(identity)
         observed_attempt_strata.append(stratum)
         rows_by_stratum[stratum].append(row)
@@ -461,6 +513,7 @@ def validate_t112_cohort(value: object) -> dict[str, object]:
             or isinstance(row.get("native_bridge_call_count"), bool)
             or not isinstance(row.get("native_bridge_call_count"), int)
             or row.get("native_bridge_call_count") != 1
+            or row.get("candidate_execution_started") is not True
             or row.get("task_id") != T112_TASK_ID
             or isinstance(row.get("sampler_seed_input"), bool)
             or not isinstance(row.get("sampler_seed_input"), int)
@@ -485,6 +538,7 @@ def validate_t112_cohort(value: object) -> dict[str, object]:
             "sampler_seed_input": row["sampler_seed_input"],
             "replicate_index": 0,
             "native_bridge_call_count": row["native_bridge_call_count"],
+            "candidate_execution_started": True,
         }
         for row in attempted
         if row.get("admitted") is True

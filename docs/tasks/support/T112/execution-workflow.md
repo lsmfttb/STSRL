@@ -80,12 +80,22 @@ head, or resource binding.
 
 Run the CLI's `execute` command under the detached resource guard. It reloads
 the qualified exact T101 source population, reuses T111's strict validator,
-deterministic per-stratum hash ordering, and no-retry record runner, and calls
-the native bridge exactly once for each attempted candidate. It stops each
-stratum on its eighth admission or exhaustion. A pre-bridge failure cannot be
-reported as a completed candidate exclusion because the T112 attempt schema
-requires one observed bridge call per attempt. No report from the old T111
-attempt is read as admission evidence.
+deterministic per-stratum hash ordering, and no-retry record runner. Each
+bridge-executed candidate has exactly one native bridge call; pre-bridge
+exclusions have zero calls. It stops each
+stratum on its eighth admission or exhaustion. Each retained T112 attempt row
+explicitly binds `candidate_execution_started` to the observed bridge-call
+count: a typed exclusion at a known pre-bridge boundary is an ordinary
+no-retry exclusion with `false`/`0`; an admitted candidate or a post-bridge
+exclusion must have `true`/`1`. Missing or unknown boundaries, impossible
+boundary/count pairs, booleans, and counts other than zero or one fail closed.
+Pre-bridge exclusions remain in the ordered attempt record and contribute to
+the reason and reason/boundary exclusion distributions, so an exhausted
+stratum can report its blocking distribution without turning valid exclusions
+into an incomplete artifact. No report from the old T111 attempt is read as
+admission evidence. This corrected row contract uses the version-2 T112
+cohort, attempt, execution-record, and final-report schemas; no artifact from
+an earlier T112 schema is silently upgraded or reused.
 
 ## Finalization and terminal vocabulary
 

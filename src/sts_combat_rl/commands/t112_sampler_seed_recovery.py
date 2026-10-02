@@ -41,6 +41,7 @@ from sts_combat_rl.sim.t111_configured_search_support import (
 )
 from sts_combat_rl.sim.t112_sampler_seed_recovery import (
     T112_APPROVED_SPEC_COMMIT,
+    T112_ATTEMPTS_SCHEMA,
     T112_COHORT_SCHEMA,
     T112_NATIVE_IDENTITY,
     T112_REPAIR_FACTS,
@@ -60,8 +61,8 @@ T112_PREPARATION_MANIFEST_SCHEMA = "t112-preparation-retention-manifest-v1"
 T112_AUTH_SCHEMA = "t112-maintainer-stage-authorization-v1"
 T112_WITNESS_RECORD_SCHEMA = "t112-native-witness-execution-record-v1"
 T112_WITNESS_TERMINAL_SCHEMA = "t112-native-witness-terminal-v1"
-T112_EXECUTION_RECORD_SCHEMA = "t112-cohort-execution-record-v1"
-T112_FINAL_REPORT_SCHEMA = "t112-final-report-v1"
+T112_EXECUTION_RECORD_SCHEMA = "t112-cohort-execution-record-v2"
+T112_FINAL_REPORT_SCHEMA = "t112-final-report-v2"
 T112_RETENTION_MANIFEST_SCHEMA = "t112-terminal-retention-manifest-v1"
 T112_INTERRUPTION_SCHEMA = "t112-execution-interruption-v1"
 T112_BRANCH = "planner/t112-sampler-seed-repair-cohort-recovery"
@@ -1284,6 +1285,7 @@ def _t112_attempt_row(
         )
     )
     copied["native_bridge_call_count"] = bridge_call_count_by_identity.get(identity, 0)
+    copied["candidate_execution_started"] = copied["native_bridge_call_count"] == 1
     copied.update(
         {
             "worker_id": shard["worker_id"],
@@ -1296,6 +1298,35 @@ def _t112_attempt_row(
         }
     )
     return copied
+
+
+def _t112_exclusion_distributions(
+    attempted: list[Mapping[str, object]],
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Retain bounded exclusions by reason and by reason/boundary."""
+
+    by_reason = Counter(
+        str(row["exclusion_reason"])
+        for row in attempted
+        if row.get("admitted") is False
+    )
+    by_reason_and_boundary = Counter(
+        (
+            str(row["exclusion_reason"]),
+            str(row["exclusion_evidence"]["boundary"]),
+        )
+        for row in attempted
+        if row.get("admitted") is False
+        and isinstance(row.get("exclusion_evidence"), Mapping)
+        and isinstance(row["exclusion_evidence"].get("boundary"), str)
+    )
+    return (
+        dict(sorted(by_reason.items())),
+        {
+            f"{reason}|{boundary}": count
+            for (reason, boundary), count in sorted(by_reason_and_boundary.items())
+        },
+    )
 
 
 def execute_t112_authorized_cohort(
@@ -1405,14 +1436,10 @@ def execute_t112_authorized_cohort(
         cohort_ref = _write_new_json(
             cohort_output_root / "t112-cohort-admission.json", cohort
         )
-        attempts_ref = _artifact_ref(
-            attempts_path, schema_id="t112-candidate-attempts-jsonl-v1"
-        )
+        attempts_ref = _artifact_ref(attempts_path, schema_id=T112_ATTEMPTS_SCHEMA)
         durations = [float(row["wall_clock_time_s"]) for row in cohort["attempted"]]
-        exclusions = Counter(
-            str(row["exclusion_reason"])
-            for row in cohort["attempted"]
-            if row.get("admitted") is False
+        exclusion_counts, exclusion_counts_by_boundary = _t112_exclusion_distributions(
+            cohort["attempted"]
         )
         record.update(
             {
@@ -1431,7 +1458,8 @@ def execute_t112_authorized_cohort(
                     "attempted_wall_clock_min_s": min(durations, default=0.0),
                     "whole_selector_wall_clock_s": max(0.0, time.monotonic() - started),
                     "no_retry_attempt_count": len(cohort["attempted"]),
-                    "exclusion_counts": dict(sorted(exclusions.items())),
+                    "exclusion_counts": exclusion_counts,
+                    "exclusion_counts_by_reason_and_boundary": exclusion_counts_by_boundary,
                     "resource_guard_observations_during_execution": active_guard_snapshots,
                 },
                 "resource_guard_plan": dict(plan["resource_guard"]),
@@ -1463,7 +1491,7 @@ def execute_t112_authorized_cohort(
             "candidate_execution_started": attempts_path.stat().st_size > 0,
             "exception_type": type(exc).__name__[:120],
             "attempt_artifact": _artifact_ref(
-                attempts_path, schema_id="t112-candidate-attempts-jsonl-v1"
+                attempts_path, schema_id=T112_ATTEMPTS_SCHEMA
             ),
         }
         try:
@@ -1483,7 +1511,7 @@ def _verify_jsonl_matches_t112_cohort(
 ) -> None:
     verified = _verify_ref(
         attempt_ref,
-        expected_schema="t112-candidate-attempts-jsonl-v1",
+        expected_schema=T112_ATTEMPTS_SCHEMA,
         expected_path=attempts_path,
     )
     actual = _read_jsonl(attempts_path, label="T112 candidate attempt JSONL")
@@ -1766,12 +1794,20 @@ def finalize_t112_execution(
         cohort=cohort,
         record=record,
     )
+    exclusion_counts, exclusion_counts_by_boundary = _t112_exclusion_distributions(
+        cohort["attempted"]
+    )
     if (
         len(cohort["attempted"]) != executor.get("attempted_count")
         or cohort["terminal_classification"] != record.get("terminal_classification")
         or record.get("candidate_execution_started") is not True
+        or executor.get("exclusion_counts") != exclusion_counts
+        or executor.get("exclusion_counts_by_reason_and_boundary")
+        != exclusion_counts_by_boundary
     ):
-        raise T112WorkflowError("T112 execution record and cohort disagree")
+        raise T112WorkflowError(
+            "T112 execution record, exclusion distribution, and cohort disagree"
+        )
     status_ref = _artifact_ref(
         resource_status_path, schema_id="stsrl-detached-job-status-v1"
     )
@@ -1815,6 +1851,9 @@ def finalize_t112_execution(
             "progressive_bias": False,
         },
         "exclusion_counts": dict(executor["exclusion_counts"]),
+        "exclusion_counts_by_reason_and_boundary": dict(
+            executor["exclusion_counts_by_reason_and_boundary"]
+        ),
         "witness_artifact": witness_ref,
         "attempt_artifact": dict(attempt_ref),
         "cohort_admission_artifact": cohort_ref,
