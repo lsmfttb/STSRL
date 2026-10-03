@@ -8,7 +8,6 @@ execution path after Maintainer exact-head/resource approval.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 
 from sts_combat_rl.commands.t085_native_execution import (
@@ -18,6 +17,9 @@ from sts_combat_rl.sim.public_run_context import (
     _validate_projection_candidate_parity,
     build_public_run_context,
     read_native_public_projection,
+)
+from sts_combat_rl.sim.t096_public_information_sampler import (
+    validate_public_information_projection,
 )
 from sts_combat_rl.sim.t101_particle_convergence import (
     T101_SEARCH_SIMULATIONS,
@@ -332,6 +334,25 @@ class T111NativeRecordRunner:
             )
         predicates["ordered_legal_action_parity"] = True
 
+        try:
+            t096_projection_method = getattr(
+                adapter, "t096_public_information_projection", None
+            )
+            if not callable(t096_projection_method):
+                raise TypeError("adapter lacks the T096 projection capability")
+            restored_t096_projection = validate_public_information_projection(
+                t096_projection_method(restored)
+            )
+        except Exception as exc:
+            failed_predicates = dict(predicates)
+            failed_predicates["public_projection_parity"] = False
+            raise self._exclude(
+                "public_projection_parity_failure",
+                boundary="restored_t096_projection_validation",
+                predicates=failed_predicates,
+                exc=exc,
+            ) from exc
+
         bridge = getattr(adapter, "sample_hidden_future_particles_search", None)
         if not callable(bridge):
             raise self._exclude(
@@ -420,34 +441,15 @@ class T111NativeRecordRunner:
                 boundary="bridge_to_restored_ordered_action_parity",
                 predicates=failed_predicates,
             )
-        anchor_projection = raw_report.get("anchor_public_information_projection")
-        canonical_payload = getattr(projection, "canonical_payload", None)
-        if isinstance(canonical_payload, str):
-            try:
-                observed_projection = json.loads(canonical_payload)
-            except json.JSONDecodeError as exc:
-                failed_predicates = dict(predicates)
-                failed_predicates["public_projection_parity"] = False
-                raise self._exclude(
-                    "public_projection_parity_failure",
-                    boundary="bridge_to_restored_projection_parity",
-                    predicates=failed_predicates,
-                    exc=exc,
-                ) from exc
-            if observed_projection != anchor_projection:
-                failed_predicates = dict(predicates)
-                failed_predicates["public_projection_parity"] = False
-                raise self._exclude(
-                    "public_projection_parity_failure",
-                    boundary="bridge_to_restored_projection_parity",
-                    predicates=failed_predicates,
-                )
-        elif projection is not None:
+        if (
+            raw_report.get("anchor_public_information_projection")
+            != restored_t096_projection
+        ):
             failed_predicates = dict(predicates)
             failed_predicates["public_projection_parity"] = False
             raise self._exclude(
                 "public_projection_parity_failure",
-                boundary="native_projection_canonical_payload_unavailable",
+                boundary="bridge_to_restored_projection_parity",
                 predicates=failed_predicates,
             )
 

@@ -7,10 +7,18 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from test_native_public_projection import _projection_raw
 from test_t110_configuration_aware_mapping import _v2_report
 
 from sts_combat_rl.commands import t111_configured_search_execution as execution
 from sts_combat_rl.commands import t111_configured_search_execution_cli as execution_cli
+from sts_combat_rl.sim.native_public_projection import (
+    NATIVE_PUBLIC_PROJECTION_SCHEMA_ID,
+    parse_native_public_projection,
+)
+from sts_combat_rl.sim.t096_public_information_sampler import (
+    T096_PUBLIC_INFORMATION_SCHEMA_ID,
+)
 from sts_combat_rl.sim.t101_particle_convergence import derive_t101_sampler_seed
 from sts_combat_rl.sim.t105_native_stage_observability import (
     STAGES_IN_EXECUTION_ORDER,
@@ -66,17 +74,24 @@ class _FakeAdapter:
         report,
         *,
         actions=None,
+        t096_projection=None,
         bridge_exception=None,
         stage_trace=None,
     ):
         self.report = report
         self.actions = _adapter_actions(report) if actions is None else actions
+        self.t096_projection = t096_projection
+        self.t096_calls = []
         self.bridge_exception = bridge_exception
         self.stage_trace = stage_trace
         self.bridge_calls = []
 
     def legal_actions(self, _restored):
         return self.actions
+
+    def t096_public_information_projection(self, restored):
+        self.t096_calls.append(restored)
+        return self.t096_projection
 
     def sample_hidden_future_particles_search(self, snapshot, **kwargs):
         self.bridge_calls.append((snapshot, kwargs))
@@ -95,32 +110,37 @@ def _runner(
     report=None,
     adapter_actions=None,
     context_candidate_actions=None,
+    direct_t096_projection=None,
     bridge_exception=None,
     stage_trace=None,
     on_bridge_call=None,
 ):
     seed = derive_t101_sampler_seed(identity, 0)
-    expected_actions = _two_particle_report(seed)["anchor_ordered_public_legal_actions"]
+    report = report or _two_particle_report(seed)
+    expected_actions = report["anchor_ordered_public_legal_actions"]
     expected_context = {
         "history": [],
         "candidate_actions": expected_actions,
         "input_state": "PLAYER_NORMAL",
     }
     restored = SimpleNamespace(raw=object())
-    projection = SimpleNamespace(
-        canonical_payload=json.dumps(
-            _two_particle_report(seed)["anchor_public_information_projection"]
-        )
-    )
+    # Keep a genuine T014 projection object whose canonical schema is
+    # intentionally different from the T096 bridge-anchor projection.
+    projection = parse_native_public_projection(_projection_raw())
     selected = SimpleNamespace(selection_identity=identity)
     canonical = SimpleNamespace(public_run_context=expected_context)
-    report = report or _two_particle_report(seed)
     adapter = _FakeAdapter(
         report,
         actions=adapter_actions,
+        t096_projection=(
+            deepcopy(report["anchor_public_information_projection"])
+            if direct_t096_projection is None
+            else direct_t096_projection
+        ),
         bridge_exception=bridge_exception,
         stage_trace=stage_trace,
     )
+    adapter.t014_projection = projection
     actual_context = dict(expected_context)
     if context_candidate_actions is not None:
         actual_context["candidate_actions"] = context_candidate_actions
@@ -160,7 +180,7 @@ def _runner(
     return runner, record, adapter, restore_calls, restored
 
 
-def test_t111_runner_restores_checks_parity_and_makes_one_frozen_bridge_call(
+def test_t111_runner_keeps_t014_and_t096_projection_schemas_separate(
     monkeypatch,
 ):
     runner, record, adapter, restore_calls, restored = _runner(monkeypatch)
@@ -189,6 +209,39 @@ def test_t111_runner_restores_checks_parity_and_makes_one_frozen_bridge_call(
         execution._adapter_actions_as_public_identities(adapter.actions)
         == result["bridge_report"]["anchor_ordered_public_legal_actions"]
     )
+    t014_projection = json.loads(adapter.t014_projection.canonical_payload)
+    t096_anchor = result["bridge_report"]["anchor_public_information_projection"]
+    assert t014_projection["schema_id"] == NATIVE_PUBLIC_PROJECTION_SCHEMA_ID
+    assert t096_anchor["schema_id"] == T096_PUBLIC_INFORMATION_SCHEMA_ID
+    assert t014_projection["schema_id"] != t096_anchor["schema_id"]
+    assert adapter.t096_calls == [restored]
+
+
+@pytest.mark.parametrize("drift", ["field", "action", "visibility"])
+def test_t111_runner_rejects_restored_t096_projection_drift(monkeypatch, drift):
+    report = _two_particle_report(derive_t101_sampler_seed("A:fixture", 0))
+    direct_projection = deepcopy(report["anchor_public_information_projection"])
+    if drift == "field":
+        direct_projection["floor_num"] += 1
+    elif drift == "action":
+        direct_projection["ordered_public_legal_actions"][0]["label"] = (
+            "different public action"
+        )
+    else:
+        direct_projection["visibility"]["enemy_intent"]["classification"] = "hidden"
+    runner, record, adapter, _restore_calls, restored = _runner(
+        monkeypatch,
+        report=report,
+        direct_t096_projection=direct_projection,
+    )
+
+    with pytest.raises(T111SupportExclusion) as error:
+        runner(record)
+
+    assert error.value.reason == "public_projection_parity_failure"
+    assert error.value.evidence["boundary"] == "bridge_to_restored_projection_parity"
+    assert adapter.t096_calls == [restored]
+    assert len(adapter.bridge_calls) == 1
 
 
 @pytest.mark.parametrize(
