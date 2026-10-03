@@ -1,8 +1,19 @@
-# T112 implementation and execution record
+# T112 implementation and execution evidence
 
-## Result
+## Current lifecycle status
 
-T112 terminal: `CONFIGURED_SEARCH_DOMAIN_SUPPORT_STILL_INSUFFICIENT`.
+Stage-2 attempt 3 is preserved as execution evidence, but it is not a T112
+scientific terminal. The exact-head Planner review in PR comment
+[5964590261](https://github.com/lsmfttb/STSRL/pull/130#issuecomment-5964590261)
+rejected its `CONFIGURED_SEARCH_DOMAIN_SUPPORT_STILL_INSUFFICIENT`
+classification: the 385 `public_projection_parity_failure` rows compare two
+different schemas, so they cannot establish a support-domain exclusion. The
+current PR remains open and draft while the Planner-authorized narrow
+T014/T096 parity correction and a fresh bounded re-entry are pending. The
+attempt 3 report, rows, logs, and retention manifest remain immutable evidence
+and must not be combined with or reclassified as rows from the corrected run.
+
+## Preserved attempt 3 observation (not terminal)
 
 The exact T101-ordered 413-candidate population was re-entered at implementation
 head `15d9f1c4a229996d93d2c1984404d3bce9d39998` under approved specification
@@ -17,11 +28,31 @@ and C `0/8` after 128. No candidate was admitted.
 | `searched_value_unavailable_nonfinite_or_unvisited` at `strict_t110_configured_search_validation` | 1 | 2 | 5 | 8 |
 | Total attempted | 93 | 192 | 128 | 413 |
 
-This is a completed bounded result, not an incomplete run or a seed-contract
-contradiction. The 385 projection-parity exclusions in this fresh attempt are
-reported only from this attempt's own retained rows; no rows or classifications
-from earlier attempts (including prior-head parity exclusions) were combined
-or reclassified.
+The process completed successfully and these counts describe only attempt 3;
+they are not a valid T112 support classification. Planner review found that the
+385 exclusions were produced by comparing a T014 `NativePublicProjection`
+restore/context payload (`native-public-projection-v1`) with the bridge's
+T096/T099 battle-information anchor (`native-battle-public-information-v1`
+or `-v2`). Those payloads are different contracts and are not expected to be
+equal. The repaired ordered-action parity check therefore merely moved these
+rows to the next, invalid cross-schema comparison. The retained attempt did not
+retroactively admit any candidate, and none of its rows may be reused as
+admissions for the correction.
+
+Planner authorized a narrow T112 correction: retain the T014
+restore/context/candidate parity checks, obtain the restored direct T096
+projection through the accepted `t096_public_information_projection`
+capability (or existing equivalent), validate it with the existing T096
+validator, and compare that like-for-like value against the bridge anchor. Do
+not compare T014 `canonical_payload` to the T096 anchor. Add tests proving the
+cross-schema comparison is absent, matching direct T096/bridge-anchor values
+pass, and T096 field/action/visibility drift fails closed. After exact-head
+review and the required stage-specific authorization, run a fresh selector
+from original T101 order, stopping each stratum at eight admissions or
+exhaustion. The 20 bridge failures and 8 searched-value failures remain
+ordinary residuals unless they prevent the required 8/8/8 support result.
+Native changes, larger replay, N>2, convergence, training, promotion, and merge
+remain out of scope.
 
 ## Implementation and witness
 
@@ -93,5 +124,6 @@ records, and T112 cohort artifacts by schema, size, and SHA-256. The finalizer
 validated these bindings; large upstream inputs remain outside Git.
 
 No N>2 execution, convergence, training, promotion, native modification, or
-automatic follow-on replay was performed or authorized by this result. The
-remaining exclusion distribution is for the next Planner decision.
+automatic follow-on replay was performed. These artifacts preserve attempt 3
+history only; T112 remains in progress until the corrected exact-head bounded
+result and required Maintainer/Planner lifecycle reviews are complete.
