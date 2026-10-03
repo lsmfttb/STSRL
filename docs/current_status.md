@@ -232,6 +232,22 @@ next diagnostic direction; that direction does not authorize a replay. See the
 and [task archive](tasks/ARCHIVE.md) for the terminal record and retention
 manifest identity.
 
+T112 corrected the STSRL bridge-input versus native-derived per-particle seed
+contract, passed its exact-native one-call N=2 witness, and completed a fresh
+exact-head bounded selector run over the full T101-ordered 413-candidate
+population with the T111 configuration unchanged. The witness accepted the
+requested bridge seed and strict native particle metadata. The cohort exhausted
+A/B/C (93/192/128 attempted) with 0/8 admissions in each stratum and terminal
+`CONFIGURED_SEARCH_DOMAIN_SUPPORT_STILL_INSUFFICIENT`. Its exclusions were 385
+bridge-to-restored-projection parity failures (87/175/123), 20 accepted
+structured bridge failures (5/15/0), and 8 searched-value
+unavailable/non-finite/unvisited cases (1/2/5). No prior attempt was combined;
+there was no retry, substitution, N>2 run, convergence, training, or promotion.
+The bounded result identifies the residual support distribution for the next
+Planner decision; it does not authorize an automatic replay or native change.
+See the [T112 execution record](tasks/support/T112/implementation-and-execution.md)
+and [task archive](tasks/ARCHIVE.md) for artifact identities.
+
 The retained closed-route conclusions remain available through the task archive
 and contracts, including the earlier Oracle-guided Search, later-act reach,
 root-prior allocation, curriculum, value-target, and Non-Combat investigations.
