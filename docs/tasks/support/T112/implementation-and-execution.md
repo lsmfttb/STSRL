@@ -2,16 +2,23 @@
 
 ## Current lifecycle status
 
-Stage-2 attempt 3 is preserved as execution evidence, but it is not a T112
-scientific terminal. The exact-head Planner review in PR comment
+The corrected Stage-2 attempt 4 at implementation producer head
+`accf76e50d2572ede5c6d00666560b46c47cc5b5` completed successfully and was
+finalized as `CONFIGURED_SEARCH_DOMAIN_SUPPORT_RECOVERED`: the exact T101
+population (A/B/C 93/192/128) yielded eight admissions in each stratum after
+27 fresh attempts (A/B/C 9/8/10). Three searched-value exclusions remained;
+no stratum exhausted. The final report SHA-256 is
+`d14b67a1f3f76461cb2a356e52df2199c901d09b23c97f80379ac5293bf6b4c9`, and the
+terminal retention manifest SHA-256 is
+`cd23575eec8f3ce8d95981534312adf7f05cccb3f6cf4ceb9391c5541b1980fb`.
+
+The prior Stage-2 attempt 3 remains preserved as execution evidence only. The
+exact-head Planner review in PR comment
 [5964590261](https://github.com/lsmfttb/STSRL/pull/130#issuecomment-5964590261)
 rejected its `CONFIGURED_SEARCH_DOMAIN_SUPPORT_STILL_INSUFFICIENT`
-classification: the 385 `public_projection_parity_failure` rows compare two
-different schemas, so they cannot establish a support-domain exclusion. The
-current PR remains open and draft while the Planner-authorized narrow
-T014/T096 parity correction and a fresh bounded re-entry are pending. The
-attempt 3 report, rows, logs, and retention manifest remain immutable evidence
-and must not be combined with or reclassified as rows from the corrected run.
+classification because 385 `public_projection_parity_failure` rows compared
+different schemas. Attempt 3 contributed no rows to attempt 4 and its report,
+rows, logs, and retention manifest remain unchanged.
 
 ## Preserved attempt 3 observation (not terminal)
 
@@ -56,7 +63,7 @@ remain out of scope.
 
 ## Implementation and witness
 
-The Maintainer reviewed the exact implementation head and recorded focused
+The Maintainer reviewed the corrected implementation head and recorded focused
 verification: 140 T111/T099/T110/T112 tests, Ruff and formatting checks,
 `compileall`, and `git diff --check` passed. No native source was modified.
 The accepted native source pin is
@@ -64,16 +71,17 @@ The accepted native source pin is
 SHA-256 is
 `cdf650362a8178aed1919efb05b2255a8986562d6617e659e8e0dca26583dd3a`.
 
-Stage-1 witness attempt 4 was finalized as
+Stage-1 witness attempt 5, bound to the same implementation producer head,
+was finalized as
 `N2_WITNESS_SEED_CONTRACT_ACCEPTED`: exactly one native bridge call, zero
 retries, matching requested/observed `sampler_seed_input`, valid indexed
 native-derived particle seed metadata, and no selector invocation. Its terminal
 artifact is
-`artifacts/t112-sampler-seed-contract-repair-76d2ff7/witness-attempt-4/t112-witness-terminal.json`
+`artifacts/t112-sampler-seed-contract-repair-76d2ff7/witness-attempt-5/t112-witness-terminal.json`
 (SHA-256
-`788b638169508afaaee570501a64f8864a8b51c27996d71b2fca6a6aaa1fc976`).
+`62cf5100dd787e582fe989b42e2961ff74c33b44a16bea3b5adffad1a46eb3a0`).
 
-## Cohort execution
+## Preserved Stage-2 attempt 3 (invalid terminal classification)
 
 The separately authorized cohort attempt 3 approval is PR comment
 [5961990819](https://github.com/lsmfttb/STSRL/pull/130#issuecomment-5961990819).
@@ -102,7 +110,7 @@ current T112 source pin and binary above. The final report records
 `selection_uses_value_or_outcome=false`, and
 `no_n_gt_2_or_convergence_execution=true`.
 
-## Retained artifacts
+## Preserved attempt 3 artifacts
 
 All paths below are under the ignored artifact root
 `artifacts/t112-sampler-seed-contract-repair-76d2ff7`:
@@ -118,12 +126,65 @@ All paths below are under the ignored artifact root
 | Final report `cohort-attempt-3/t112-final-report.json` | `t112-final-report-v2` | `beb5204250d0c6092e03e26e56954085e204a1cd1264447988c1538377314350` |
 | Terminal retention manifest `cohort-attempt-3/t112-terminal-retention-manifest.json` | `t112-terminal-retention-manifest-v1` | `51f40223ab839967ff5e67f517cbe0712c4357d8234d96e95cc28e4e1bc8ef71` |
 
-The retention manifest binds the detached resource status, native source
-manifest and binary, preparation and witness outputs, T101/T111 predecessor
-records, and T112 cohort artifacts by schema, size, and SHA-256. The finalizer
-validated these bindings; large upstream inputs remain outside Git.
+The attempt-3 retention manifest binds its own detached status and evidence.
+That run remains immutable audit history; its invalid terminal classification
+and rows were not reused.
 
+## Corrected Stage-2 cohort attempt 4
+
+The separately authorized attempt 4 is bound to producer head
+`accf76e50d2572ede5c6d00666560b46c47cc5b5` and Stage-1 witness attempt 5. Its
+approval is PR comment
+[5965216719](https://github.com/lsmfttb/STSRL/pull/130#issuecomment-5965216719);
+its authorization SHA-256 is
+`695a013899a4060ec4549bf9797db14cbfad8583cc00e77c09443f30814db3cd`. The
+single worker covered `[0,413)` with A `[0,93)`, B `[93,285)`, C `[285,413)`.
+Frozen settings were replicate 0, `particle_start=0`, N=2, unguided
+Search-v2@400, no potions, and no retry, reseed, fallback, or substitution.
+The job started at `2026-10-03T03:54:06.685677Z` and finished at
+`2026-10-03T04:20:41.259308Z` with state `SUCCEEDED`, exit code 0.
+
+Finalization independently verified the exact-head authorization, accepted
+witness, T101/T111/native provenance, full 413-row source order, strict T111
+candidate validation, cohort/attempt records, direct like-for-like T096 public
+projection parity, and completed resource guard. The ordered-identity
+SHA-256 is
+`a99fcd38ea6e5c14190b0964c8ec5a04fc40f501d91ab4409c7205bc8b3677bb`. The run
+made 27 unique attempts (A/B/C 9/8/10) and admitted 8/8/8; every row records
+one native bridge call, zero retries, and passing `public_projection_parity`.
+Three candidates were excluded as
+`searched_value_unavailable_nonfinite_or_unvisited` at
+`strict_t110_configured_search_validation`. No stratum exhausted. The terminal
+classification is `CONFIGURED_SEARCH_DOMAIN_SUPPORT_RECOVERED`.
+
+The guard completed for 1,592 samples, with peak RSS 3,631 MiB against the
+8,192 MiB cap and lowest available memory 19,460 MiB against the 8,192 MiB
+floor; it reported no sample error or tripwire and released the lease. The
+aggregate memory budget was 16,384 MiB. The result used only attempt-4 rows;
+the prior attempt-3 rows and its 385 cross-schema exclusions were not reused.
 No N>2 execution, convergence, training, promotion, native modification, or
-automatic follow-on replay was performed. These artifacts preserve attempt 3
-history only; T112 remains in progress until the corrected exact-head bounded
-result and required Maintainer/Planner lifecycle reviews are complete.
+automatic follow-on replay was performed.
+
+## Corrected attempt 4 retained artifacts
+
+Paths are under the ignored artifact root
+`artifacts/t112-sampler-seed-contract-repair-76d2ff7`:
+
+| Artifact | Schema | SHA-256 |
+| --- | --- | --- |
+| Input qualification `preparation-attempt-5/t112-input-qualification.json` | `t112-input-qualification-v1` | `8497abafdcabdedd00d84fcbc8bce1de5d616d7d90385554e902d74398436fca` |
+| Readiness `preparation-attempt-5/t112-readiness-preparation.json` | `t112-readiness-preparation-v1` | `000c795b497ebb798702a24cbf4ff1340f0e7e9b6b27ee48462275052124690e` |
+| Preparation retention manifest `preparation-attempt-5/t112-preparation-retention-manifest.json` | `t112-preparation-retention-manifest-v1` | `cf1a3ba06f83933abf9cf11b05b63bb27532eb9b8200ae67689c887759c4bcaf` |
+| Witness terminal `witness-attempt-5/t112-witness-terminal.json` | `t112-native-witness-terminal-v2` | `62cf5100dd787e582fe989b42e2961ff74c33b44a16bea3b5adffad1a46eb3a0` |
+| Cohort authorization `jobs/t112-cohort-authorization-accf76e-attempt-4.json` | `t112-maintainer-stage-authorization-v1` | `695a013899a4060ec4549bf9797db14cbfad8583cc00e77c09443f30814db3cd` |
+| Detached resource status `jobs/t112-cohort-attempt-4.status.json` | `stsrl-detached-job-status-v1` | `42c3fc2ff977e038964a4d5eb8bb3a430213e17d4a2bb90ac6a9877c7d273800` |
+| Candidate attempts `cohort-attempt-4/t112-candidate-attempts.jsonl` | `t112-candidate-attempts-jsonl-v2` | `22127da03747055184d7aa021435095b8d25784f473e9f671d77fb0682190418` |
+| Cohort admission `cohort-attempt-4/t112-cohort-admission.json` | `t112-configured-search-cohort-admission-v2` | `3f83ab718bdcba98cdf26cc29233178fde96c7b9a796237139db499b34936ac1` |
+| Execution record `cohort-attempt-4/t112-execution-record.json` | `t112-cohort-execution-record-v2` | `a3bd662e56c632a09cf8f3101f09a409437f511584195e3920cdb02c0e6af4e4` |
+| Final report `cohort-attempt-4/t112-final-report.json` | `t112-final-report-v2` | `d14b67a1f3f76461cb2a356e52df2199c901d09b23c97f80379ac5293bf6b4c9` |
+| Terminal retention manifest `cohort-attempt-4/t112-terminal-retention-manifest.json` | `t112-terminal-retention-manifest-v1` | `cd23575eec8f3ce8d95981534312adf7f05cccb3f6cf4ceb9391c5541b1980fb` |
+
+The terminal manifest binds the detached status, native source manifest and
+binary, preparation and witness outputs, T101/T111 predecessor records, and
+T112 cohort artifacts by schema, size, and SHA-256. Large upstream inputs
+remain outside Git.
