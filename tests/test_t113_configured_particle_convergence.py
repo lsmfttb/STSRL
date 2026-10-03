@@ -24,8 +24,14 @@ from sts_combat_rl.sim.t113_configured_particle_convergence import (
     T113_APPROVED_SPEC_COMMIT,
     T113_EXACT_T112_COHORT_SHA256,
     T113_EXACT_T112_RETENTION_SHA256,
+    T113_EXECUTION_ENVELOPE_SCHEMA,
+    T113_NATIVE_IDENTITY,
+    T113_STAGE_EXECUTION_ENVELOPE_SCHEMA,
     T113ConvergenceError,
     analyze_t113_batch,
+    analyze_t113_formal,
+    build_t113_canary_evidence,
+    build_t113_cost_report,
     build_t113_fixed_cohort,
     build_t113_formal_plan,
     validate_t113_bridge_report,
@@ -195,6 +201,125 @@ def _fixed_cohort(t112: dict[str, object]) -> dict[str, object]:
     )
 
 
+def _canonical_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _formal_fixture() -> tuple[
+    dict[str, object], dict[str, object], list[dict[str, object]]
+]:
+    cohort = _fixed_cohort(_t112_cohort())
+    plan = build_t113_formal_plan(
+        cohort,
+        implementation_head=T113_APPROVED_SPEC_COMMIT,
+        input_qualification_sha256="d" * 64,
+        fixed_cohort_sha256=_canonical_sha256(cohort),
+    )
+    template = _batch_report()
+    rows: list[dict[str, object]] = []
+    for job in plan["jobs"]:
+        report = deepcopy(template)
+        report["sampler_seed_input"] = job["sampler_seed_input"]
+        rows.append(
+            {
+                "selection_identity": job["selection_identity"],
+                "stratum": job["stratum"],
+                "replicate_index": job["replicate_index"],
+                "job_ordinal": job["job_ordinal"],
+                "sampler_seed_input": job["sampler_seed_input"],
+                "native_identity": dict(T113_NATIVE_IDENTITY),
+                "particle_start": 0,
+                "particle_count": 32,
+                "search_simulations_per_particle": 400,
+                "include_potions": False,
+                "bridge_report": report,
+                "wall_clock_time_s": 2.0,
+                "worker_id": f"worker-{job['replicate_index']}",
+                "effective_concurrency": 4,
+                "shard_index": job["state_ordinal"],
+                "failure_retry_status": "success_no_retry",
+                "retry_reason": None,
+                "result_source": "formal_n32_call",
+            }
+        )
+    return cohort, plan, rows
+
+
+def _canary_evidence_fixture(
+    cohort: dict[str, object], *, implementation_head: str
+) -> dict[str, object]:
+    selected = cohort["selected"]
+    ladders = [
+        _ladder(
+            next(
+                row["selection_identity"]
+                for row in selected
+                if row["stratum"] == stratum
+            ),
+            stratum,
+        )
+        for stratum in T101_SOURCE_COUNTS
+    ]
+    return build_t113_canary_evidence(
+        ladders,
+        cohort_manifest=cohort,
+        implementation_head=implementation_head,
+    )
+
+
+def _execution_envelopes(
+    cohort: dict[str, object],
+    plan: dict[str, object],
+) -> dict[str, object]:
+    def stage(
+        stage_name: str,
+        input_binding_sha256: str,
+        bridge_call_count: int,
+        started_at_utc: str,
+        finished_at_utc: str,
+    ) -> dict[str, object]:
+        return {
+            "schema_id": T113_STAGE_EXECUTION_ENVELOPE_SCHEMA,
+            "task_id": "T113",
+            "stage_name": stage_name,
+            "implementation_head": plan["implementation_head"],
+            "input_binding_sha256": input_binding_sha256,
+            "bridge_call_count": bridge_call_count,
+            "terminal_status": "SUCCEEDED",
+            "started_at_utc": started_at_utc,
+            "finished_at_utc": finished_at_utc,
+        }
+
+    return {
+        "schema_id": T113_EXECUTION_ENVELOPE_SCHEMA,
+        "task_id": "T113",
+        "implementation_head": plan["implementation_head"],
+        "complete": True,
+        "canary_stage": stage(
+            "direct_canary_ladder",
+            _canonical_sha256(cohort),
+            15,
+            "2026-10-03T12:00:00Z",
+            "2026-10-03T12:00:30Z",
+        ),
+        "formal_stage": stage(
+            "formal_n32_batch",
+            _canonical_sha256(plan),
+            96,
+            "2026-10-03T12:01:00Z",
+            "2026-10-03T12:04:00Z",
+        ),
+    }
+
+
 def test_t113_strict_adapter_uses_only_searched_classes_and_native_seed_metadata():
     seed = derive_t101_sampler_seed("A:fixture", 2)
     report = _batch_report(seed=seed)
@@ -361,6 +486,109 @@ def test_t113_canary_proves_direct_nested_prefix_including_native_seed_fields():
     ladder["calls"]["8"]["bridge_report"]["particles"][4]["sampler_seed"] += 1
     with pytest.raises(T113ConvergenceError, match="prefix"):
         validate_t113_canary_ladder(ladder)
+
+
+def test_t113_canary_rejects_zero_direct_n2_elapsed_time():
+    ladder = _ladder("A:first", "A")
+    ladder["calls"]["2"]["wall_clock_time_s"] = 0
+    with pytest.raises(T113ConvergenceError, match="strictly positive"):
+        validate_t113_canary_ladder(ladder)
+
+
+def test_t113_formal_cost_separates_call_sums_from_measured_stage_elapsed():
+    cohort, plan, rows = _formal_fixture()
+    analysis = analyze_t113_formal(rows, plan)
+    analysis_cost = analysis["cost_report"]
+    assert analysis_cost["aggregate_formal_bridge_call_time_s"] == 192.0
+    assert analysis_cost["measured_formal_stage_elapsed_time_s"] is None
+    assert analysis_cost["formal_stage_elapsed_time_status"] == (
+        "DEFERRED_EXECUTION_ENVELOPE_REQUIRED"
+    )
+    assert "total_observed_formal_wall_clock_time_s" not in analysis_cost
+    assert len(analysis_cost["formal_calls"]) == 96
+    assert all(
+        row["effective_concurrency"] == 4 for row in analysis_cost["formal_calls"]
+    )
+
+    canary = _canary_evidence_fixture(
+        cohort, implementation_head=plan["implementation_head"]
+    )
+    envelopes = _execution_envelopes(cohort, plan)
+    cost = build_t113_cost_report(
+        rows,
+        plan,
+        canary_evidence=canary,
+        cohort_manifest=cohort,
+        execution_envelopes=envelopes,
+    )
+    assert cost["total_observed_wall_clock_time_s"] == 240.0
+    assert cost["total_observed_wall_clock_time_scope"] == (
+        "canary_stage_start_to_formal_stage_finish_including_inter_stage_gap"
+    )
+    assert cost["canary_stage_elapsed_time_s"] == 30.0
+    assert cost["formal_stage_elapsed_time_s"] == 180.0
+    assert cost["inter_stage_gap_s"] == 30.0
+    assert cost["aggregate_bridge_call_time_s"] == {
+        "formal": 192.0,
+        "canary": 46.5,
+        "all_calls": 238.5,
+        "scope": "sum_of_individual_bridge_call_durations_not_stage_elapsed_time",
+    }
+    assert cost["formal_bridge_call_count"] == 96
+    assert cost["formal_particle_count"] == 3072
+    assert cost["canary_direct_bridge_call_count"] == 15
+    assert cost["canary_particle_count"] == 186
+    assert cost["total_search_v2_continuation_count"] == 3258
+    assert cost["effective_concurrency"]["formal_maximum"] == 4
+    assert len(cost["formal_calls"]) == 96
+    assert len(cost["canary_calls"]) == 15
+    assert cost["formal_native_work_counter_sums"]
+    assert cost["total_native_work_counter_sums"]
+    scaling = cost["direct_canary_n2_to_n32_scaling"]
+    assert scaling["state_count"] == 3
+    assert scaling["wall_clock_ratio_distribution"]["count"] == 3
+    assert all(
+        row["n2_to_n32_wall_clock_ratio"] == 16.0 for row in scaling["per_state"]
+    )
+    assert cost["formal_prefix_work_counts_are_summed_from_n32_particle_rows"] is True
+    assert cost["formal_prefix_wall_time_fabricated"] is False
+
+
+def test_t113_formal_analysis_rejects_zero_elapsed_time_and_missing_envelope_fails_closed():
+    cohort, plan, rows = _formal_fixture()
+    rows[0]["wall_clock_time_s"] = 0
+    with pytest.raises(T113ConvergenceError, match="positive elapsed time"):
+        analyze_t113_formal(rows, plan)
+
+    cohort, plan, rows = _formal_fixture()
+    canary = _canary_evidence_fixture(
+        cohort, implementation_head=plan["implementation_head"]
+    )
+    with pytest.raises(T113ConvergenceError, match="durable.*execution envelopes"):
+        build_t113_cost_report(
+            rows,
+            plan,
+            canary_evidence=canary,
+            cohort_manifest=cohort,
+            execution_envelopes={},
+        )
+
+
+def test_t113_cost_report_cannot_omit_zero_n2_scaling_sample():
+    cohort, plan, rows = _formal_fixture()
+    canary = _canary_evidence_fixture(
+        cohort, implementation_head=plan["implementation_head"]
+    )
+    canary["ladders"][0]["direct_wall_clock_time_s"]["2"] = 0
+    envelopes = _execution_envelopes(cohort, plan)
+    with pytest.raises(T113ConvergenceError, match="strictly positive"):
+        build_t113_cost_report(
+            rows,
+            plan,
+            canary_evidence=canary,
+            cohort_manifest=cohort,
+            execution_envelopes=envelopes,
+        )
 
 
 def test_t113_fixed_cohort_and_formal_plan_are_exact_non_authorizing_96_jobs():

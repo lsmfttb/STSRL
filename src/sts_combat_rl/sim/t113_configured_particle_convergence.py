@@ -14,6 +14,7 @@ import json
 import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
+from datetime import datetime, timedelta
 from statistics import stdev
 from typing import Any
 
@@ -59,6 +60,8 @@ T113_FORMAL_PLAN_SCHEMA = "t113-formal-execution-plan-v1"
 T113_CANARY_LADDER_SCHEMA = "t113-canary-ladder-v1"
 T113_CANARY_EVIDENCE_SCHEMA = "t113-canary-evidence-v1"
 T113_FORMAL_EVIDENCE_SCHEMA = "t113-formal-evidence-v1"
+T113_EXECUTION_ENVELOPE_SCHEMA = "t113-execution-envelope-set-v1"
+T113_STAGE_EXECUTION_ENVELOPE_SCHEMA = "t113-stage-execution-envelope-v1"
 T113_CONVERGENCE_SCHEMA = "t113-configured-domain-convergence-v1"
 T113_COST_SCHEMA = "t113-cost-report-v1"
 T113_STABILITY_OBSERVED = "BOUNDED_CONFIGURED_PARTICLE_PROXY_STABILITY_OBSERVED"
@@ -103,6 +106,7 @@ T113_RETENTION_ARTIFACT_ROLES = {
     "fixed_cohort": T113_COHORT_SCHEMA,
     "canary_evidence": T113_CANARY_EVIDENCE_SCHEMA,
     "formal_plan": T113_FORMAL_PLAN_SCHEMA,
+    "execution_envelopes": T113_EXECUTION_ENVELOPE_SCHEMA,
     "formal_evidence": T113_FORMAL_EVIDENCE_SCHEMA,
     "convergence_analysis": T113_CONVERGENCE_SCHEMA,
     "cost_report": T113_COST_SCHEMA,
@@ -156,6 +160,116 @@ def _canonical_sha256(value: object) -> str:
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
+
+
+def _utc_timestamp(value: object, label: str) -> datetime:
+    if not isinstance(value, str) or "T" not in value or not value.endswith("Z"):
+        raise T113ConvergenceError(f"{label} must be an ISO-8601 UTC timestamp")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise T113ConvergenceError(
+            f"{label} must be an ISO-8601 UTC timestamp"
+        ) from exc
+    if parsed.utcoffset() != timedelta(0):
+        raise T113ConvergenceError(f"{label} must use UTC")
+    return parsed
+
+
+def _stage_execution_interval(
+    value: object,
+    *,
+    stage_name: str,
+    implementation_head: str,
+    input_binding_sha256: str,
+    bridge_call_count: int,
+) -> tuple[datetime, datetime, float]:
+    if (
+        not isinstance(value, Mapping)
+        or value.get("schema_id") != T113_STAGE_EXECUTION_ENVELOPE_SCHEMA
+        or value.get("task_id") != T113_TASK_ID
+        or value.get("stage_name") != stage_name
+        or value.get("implementation_head") != implementation_head
+        or value.get("input_binding_sha256") != input_binding_sha256
+        or value.get("bridge_call_count") != bridge_call_count
+        or value.get("terminal_status") != "SUCCEEDED"
+    ):
+        raise T113ConvergenceError(
+            f"durable {stage_name} execution envelope binding is invalid"
+        )
+    started = _utc_timestamp(value.get("started_at_utc"), f"{stage_name} start")
+    finished = _utc_timestamp(value.get("finished_at_utc"), f"{stage_name} finish")
+    elapsed = (finished - started).total_seconds()
+    if not math.isfinite(elapsed) or elapsed <= 0:
+        raise T113ConvergenceError(
+            f"durable {stage_name} execution envelope must have positive elapsed time"
+        )
+    return started, finished, elapsed
+
+
+def _execution_envelope_timings(
+    value: object,
+    *,
+    implementation_head: str,
+    canary_input_sha256: str,
+    formal_input_sha256: str,
+    canary_bridge_call_count: int,
+    formal_bridge_call_count: int,
+) -> dict[str, object]:
+    if (
+        not isinstance(value, Mapping)
+        or value.get("schema_id") != T113_EXECUTION_ENVELOPE_SCHEMA
+        or value.get("task_id") != T113_TASK_ID
+        or value.get("implementation_head") != implementation_head
+        or value.get("complete") is not True
+    ):
+        raise T113ConvergenceError(
+            "complete durable canary and formal execution envelopes are required"
+        )
+    canary_started, canary_finished, canary_elapsed = _stage_execution_interval(
+        value.get("canary_stage"),
+        stage_name="direct_canary_ladder",
+        implementation_head=implementation_head,
+        input_binding_sha256=canary_input_sha256,
+        bridge_call_count=canary_bridge_call_count,
+    )
+    formal_started, formal_finished, formal_elapsed = _stage_execution_interval(
+        value.get("formal_stage"),
+        stage_name="formal_n32_batch",
+        implementation_head=implementation_head,
+        input_binding_sha256=formal_input_sha256,
+        bridge_call_count=formal_bridge_call_count,
+    )
+    if formal_started < canary_finished:
+        raise T113ConvergenceError(
+            "canary and formal execution envelopes overlap or are out of order"
+        )
+    end_to_end = (formal_finished - canary_started).total_seconds()
+    gap = (formal_started - canary_finished).total_seconds()
+    if not math.isfinite(end_to_end) or end_to_end <= 0 or gap < 0:
+        raise T113ConvergenceError("execution envelope end-to-end interval is invalid")
+    return {
+        "canary_stage_started_at_utc": canary_started.isoformat().replace(
+            "+00:00", "Z"
+        ),
+        "canary_stage_finished_at_utc": canary_finished.isoformat().replace(
+            "+00:00", "Z"
+        ),
+        "formal_stage_started_at_utc": formal_started.isoformat().replace(
+            "+00:00", "Z"
+        ),
+        "formal_stage_finished_at_utc": formal_finished.isoformat().replace(
+            "+00:00", "Z"
+        ),
+        "canary_stage_elapsed_time_s": canary_elapsed,
+        "formal_stage_elapsed_time_s": formal_elapsed,
+        "inter_stage_gap_s": gap,
+        "total_observed_wall_clock_time_s": end_to_end,
+        "total_observed_wall_clock_time_scope": (
+            "canary_stage_start_to_formal_stage_finish_including_inter_stage_gap"
+        ),
+        "execution_envelope_set_sha256": _canonical_sha256(value),
+    }
 
 
 def _native_seed_metadata(
@@ -546,8 +660,8 @@ def validate_t113_canary_ladder(value: object) -> dict[str, object]:
         )
         raw_reports[count] = call.get("bridge_report")
         wall = _finite(call.get("wall_clock_time_s"), "canary wall time")
-        if wall < 0:
-            raise T113ConvergenceError("canary wall time must be non-negative")
+        if wall <= 0:
+            raise T113ConvergenceError("canary wall time must be strictly positive")
         worker = call.get("worker_id")
         if (
             not isinstance(worker, str)
@@ -606,7 +720,7 @@ def validate_t113_canary_ladder(value: object) -> dict[str, object]:
         "sampler_seed_input": seed,
         "direct_prefix_equivalence": True,
         "direct_wall_clock_time_s": {str(k): elapsed[k] for k in T101_COUNTS},
-        "n2_to_n32_wall_clock_ratio": n32 / n2 if n2 > 0 else None,
+        "n2_to_n32_wall_clock_ratio": n32 / n2,
         "direct_runtime_provenance": {str(k): runtime[k] for k in T101_COUNTS},
         "direct_bridge_reports": {
             str(count): raw_reports[count] for count in T101_COUNTS
@@ -1224,7 +1338,9 @@ def validate_t113_formal_rows(
             or row.get("include_potions") is not False
         ):
             raise T113ConvergenceError("T113 formal row identity or config drifted")
-        report = validate_t113_bridge_report(
+        # Preserve the raw T110 v2 shape; T113 adapter-only fields are not part
+        # of the strict bridge schema consumed by analyze_t113_batch.
+        validate_t113_bridge_report(
             row.get("bridge_report"),
             particle_count=32,
             expected_sampler_seed=int(job["sampler_seed_input"]),
@@ -1232,7 +1348,7 @@ def validate_t113_formal_rows(
         wall = _finite(row.get("wall_clock_time_s"), "formal bridge wall time")
         effective = row.get("effective_concurrency")
         if (
-            wall < 0
+            wall <= 0
             or not isinstance(row.get("worker_id"), str)
             or not row.get("worker_id")
             or isinstance(effective, bool)
@@ -1253,13 +1369,12 @@ def validate_t113_formal_rows(
             )
         ):
             raise T113ConvergenceError(
-                "T113 formal runtime/retry provenance is invalid"
+                "T113 formal runtime/retry provenance or positive elapsed time is invalid"
             )
         if row.get("result_source") != "formal_n32_call":
             raise T113ConvergenceError(
                 "T113 formal row source/reuse binding is invalid"
             )
-        row["bridge_report"] = report
         observed.add(key)
     if observed != set(expected):
         raise T113ConvergenceError("T113 formal evidence is incomplete")
@@ -1495,7 +1610,7 @@ def analyze_t113_formal(
         for stratum in T101_SOURCE_COUNTS
     )
     summaries.append(summary("multi_class_informative", informative))
-    total_wall = sum(float(row["wall_clock_time_s"]) for row in formal)
+    aggregate_call_time = sum(float(row["wall_clock_time_s"]) for row in formal)
     all_particles = [
         particle for row in formal for particle in row["bridge_report"]["particles"]
     ]
@@ -1510,6 +1625,8 @@ def analyze_t113_formal(
                 "particle_count": 32,
                 "search_simulations_per_particle": T101_SEARCH_SIMULATIONS,
                 "wall_clock_time_s": row["wall_clock_time_s"],
+                "failure_retry_status": row["failure_retry_status"],
+                "retry_reason": row.get("retry_reason"),
                 "effective_concurrency": row["effective_concurrency"],
                 "worker_id": row["worker_id"],
                 "shard_index": row["shard_index"],
@@ -1543,7 +1660,11 @@ def analyze_t113_formal(
             "formal_call_count": len(formal),
             "formal_particle_count": len(all_particles),
             "formal_search_continuation_count": len(all_particles),
-            "total_observed_formal_wall_clock_time_s": total_wall,
+            "aggregate_formal_bridge_call_time_s": aggregate_call_time,
+            "measured_formal_stage_elapsed_time_s": None,
+            "formal_stage_elapsed_time_status": (
+                "DEFERRED_EXECUTION_ENVELOPE_REQUIRED"
+            ),
             "maximum_effective_concurrency": max(
                 int(row["effective_concurrency"]) for row in formal
             ),
@@ -1559,13 +1680,18 @@ def build_t113_cost_report(
     *,
     canary_evidence: Mapping[str, object],
     cohort_manifest: Mapping[str, object],
+    execution_envelopes: Mapping[str, object],
 ) -> dict[str, object]:
-    """Combine observed formal cost with direct canary N=2..32 scaling."""
+    """Combine per-call cost with durable canary/formal elapsed-time envelopes."""
 
-    formal = validate_t113_formal_rows(rows, plan)
-    canary = validate_t113_canary_evidence(
-        canary_evidence, cohort_manifest=cohort_manifest
-    )
+    checked_plan = validate_t113_formal_plan(plan)
+    cohort = validate_t113_fixed_cohort(cohort_manifest)
+    formal = validate_t113_formal_rows(rows, checked_plan)
+    canary = validate_t113_canary_evidence(canary_evidence, cohort_manifest=cohort)
+    if canary["implementation_head"] != checked_plan["implementation_head"]:
+        raise T113ConvergenceError(
+            "canary and formal cost evidence use different implementation heads"
+        )
     canary_calls = [
         (ladder, count) for ladder in canary["ladders"] for count in T101_COUNTS
     ]
@@ -1574,13 +1700,22 @@ def build_t113_cost_report(
         or len(canary_calls) != 15
     ):
         raise T113ConvergenceError("T113 cost evidence is incomplete")
-    canary_wall = sum(
+    canary_call_time = sum(
         float(ladder["direct_wall_clock_time_s"][str(count)])
         for ladder, count in canary_calls
     )
-    formal_wall = sum(float(row["wall_clock_time_s"]) for row in formal)
+    formal_call_time = sum(float(row["wall_clock_time_s"]) for row in formal)
+    timing = _execution_envelope_timings(
+        execution_envelopes,
+        implementation_head=str(checked_plan["implementation_head"]),
+        canary_input_sha256=_canonical_sha256(cohort),
+        formal_input_sha256=_canonical_sha256(checked_plan),
+        canary_bridge_call_count=len(canary_calls),
+        formal_bridge_call_count=len(formal),
+    )
     canary_work: list[Mapping[str, object]] = []
     scaling_rows: list[dict[str, object]] = []
+    canary_call_rows: list[dict[str, object]] = []
     for ladder in canary["ladders"]:
         reports = ladder["direct_bridge_reports"]
         n2_wall = float(ladder["direct_wall_clock_time_s"]["2"])
@@ -1593,13 +1728,29 @@ def build_t113_cost_report(
                 "stratum": ladder["stratum"],
                 "n2_wall_clock_time_s": n2_wall,
                 "n32_wall_clock_time_s": n32_wall,
-                "n2_to_n32_wall_clock_ratio": (
-                    n32_wall / n2_wall if n2_wall > 0 else None
-                ),
+                "n2_to_n32_wall_clock_ratio": n32_wall / n2_wall,
                 "n2_native_work_counter_sums": n2_work,
                 "n32_native_work_counter_sums": n32_work,
             }
         )
+        for count in T101_COUNTS:
+            runtime = ladder["direct_runtime_provenance"][str(count)]
+            canary_call_rows.append(
+                {
+                    "selection_identity": ladder["selection_identity"],
+                    "stratum": ladder["stratum"],
+                    "particle_count": count,
+                    "search_simulations_per_particle": T101_SEARCH_SIMULATIONS,
+                    "wall_clock_time_s": ladder["direct_wall_clock_time_s"][str(count)],
+                    "worker_id": runtime["worker_id"],
+                    "shard_index": runtime["shard_index"],
+                    "effective_concurrency": runtime["effective_concurrency"],
+                    "failure_retry_status": runtime["failure_retry_status"],
+                    "native_work_counter_sums": _work_counter_sums(
+                        reports[str(count)]["particles"]
+                    ),
+                }
+            )
         canary_work.extend(
             _work_counter_sums(reports[str(count)]["particles"])
             for count in T101_COUNTS
@@ -1616,6 +1767,26 @@ def build_t113_cost_report(
     formal_work = _work_counter_sums(
         [particle for row in formal for particle in row["bridge_report"]["particles"]]
     )
+    formal_call_rows = [
+        {
+            "selection_identity": row["selection_identity"],
+            "stratum": row["stratum"],
+            "replicate_index": row["replicate_index"],
+            "job_ordinal": row["job_ordinal"],
+            "particle_count": 32,
+            "search_simulations_per_particle": T101_SEARCH_SIMULATIONS,
+            "wall_clock_time_s": row["wall_clock_time_s"],
+            "worker_id": row["worker_id"],
+            "shard_index": row["shard_index"],
+            "effective_concurrency": row["effective_concurrency"],
+            "failure_retry_status": row["failure_retry_status"],
+            "retry_reason": row.get("retry_reason"),
+            "native_work_counter_sums": _work_counter_sums(
+                row["bridge_report"]["particles"]
+            ),
+        }
+        for row in formal
+    ]
     return {
         "schema_id": T113_COST_SCHEMA,
         "task_id": T113_TASK_ID,
@@ -1629,24 +1800,27 @@ def build_t113_cost_report(
             sum(len(row["bridge_report"]["particles"]) for row in formal)
             + sum(count for _ladder, count in canary_calls)
         ),
-        "total_observed_wall_clock_time_s": formal_wall + canary_wall,
-        "formal_observed_wall_clock_time_s": formal_wall,
-        "canary_observed_wall_clock_time_s": canary_wall,
+        **timing,
+        "aggregate_bridge_call_time_s": {
+            "formal": formal_call_time,
+            "canary": canary_call_time,
+            "all_calls": formal_call_time + canary_call_time,
+            "scope": "sum_of_individual_bridge_call_durations_not_stage_elapsed_time",
+        },
         "effective_concurrency": {
             "formal_maximum": max(int(row["effective_concurrency"]) for row in formal),
             "canary_maximum": 1,
+            "formal_per_call": [row["effective_concurrency"] for row in formal],
         },
         "formal_native_work_counter_sums": dict(sorted(formal_work.items())),
         "total_native_work_counter_sums": dict(sorted(total_work.items())),
+        "formal_calls": formal_call_rows,
+        "canary_calls": canary_call_rows,
         "direct_canary_n2_to_n32_scaling": {
             "state_count": len(scaling_rows),
             "per_state": scaling_rows,
             "wall_clock_ratio_distribution": _distribution(
-                [
-                    float(row["n2_to_n32_wall_clock_ratio"])
-                    for row in scaling_rows
-                    if row["n2_to_n32_wall_clock_ratio"] is not None
-                ]
+                [float(row["n2_to_n32_wall_clock_ratio"]) for row in scaling_rows]
             ),
         },
         "formal_prefix_work_counts_are_summed_from_n32_particle_rows": True,
@@ -1658,8 +1832,10 @@ __all__ = [
     "T113_APPROVED_SPEC_COMMIT",
     "T113_CANARY_EVIDENCE_SCHEMA",
     "T113_COHORT_SCHEMA",
+    "T113_EXECUTION_ENVELOPE_SCHEMA",
     "T113_FORMAL_PLAN_SCHEMA",
     "T113_NATIVE_IDENTITY",
+    "T113_STAGE_EXECUTION_ENVELOPE_SCHEMA",
     "T113_TASK_ID",
     "T113ConvergenceError",
     "analyze_t113_batch",
