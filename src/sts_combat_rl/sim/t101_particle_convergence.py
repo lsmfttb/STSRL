@@ -324,9 +324,18 @@ def validate_t101_input_admission(value: object) -> dict[str, object]:
 
 
 def validate_t101_bridge_report(
-    value: object, *, particle_count: int
+    value: object,
+    *,
+    particle_count: int,
+    expected_sampler_seed: int | None = None,
 ) -> dict[str, Any]:
-    """Apply T099 validation plus T101's exact Search and finite-value gate."""
+    """Apply T099 validation plus T101's exact Search and finite-value gate.
+
+    When the caller knows the requested T101 input seed, it may bind the
+    report's bridge-level ``sampler_seed_input`` to it.  Per-particle
+    ``sampler_seed`` values remain native-derived metadata validated by T099;
+    they are not required to echo that bridge input.
+    """
 
     try:
         report = validate_t099_particle_search_bridge(value)
@@ -341,11 +350,16 @@ def validate_t101_bridge_report(
         raise T101IncompleteError(
             "bridge call differs from particle_start=0, Search-v2@400, no-potion"
         )
+    if expected_sampler_seed is not None and (
+        isinstance(expected_sampler_seed, bool)
+        or not isinstance(expected_sampler_seed, int)
+        or not 0 <= expected_sampler_seed < 2**64
+        or report["sampler_seed_input"] != expected_sampler_seed
+    ):
+        raise T101IncompleteError(
+            "bridge sampler_seed_input differs from the requested T101 seed"
+        )
     for particle in report["particles"]:
-        if particle["sampler_seed"] != report["sampler_seed_input"]:
-            raise T101IncompleteError(
-                "per-particle sampler seed differs from the bridge sampler seed"
-            )
         root = particle["root_evaluation"]
         if (
             root["simulations_requested"] != T101_SEARCH_SIMULATIONS
@@ -383,7 +397,11 @@ def call_t101_bridge(
         search_simulations=T101_SEARCH_SIMULATIONS,
         include_potions=False,
     )
-    return validate_t101_bridge_report(report, particle_count=particle_count)
+    return validate_t101_bridge_report(
+        report,
+        particle_count=particle_count,
+        expected_sampler_seed=sampler_seed,
+    )
 
 
 def _source_population(
@@ -440,7 +458,9 @@ def _validate_admission_bridge_runtime(
     }
 
 
-def _validate_admission_evidence(value: object) -> dict[str, object]:
+def _validate_admission_evidence(
+    value: object, *, expected_sampler_seed: int
+) -> dict[str, object]:
     if not isinstance(value, Mapping):
         raise T101IncompleteError("admission evidence is missing")
     required_true = (
@@ -453,7 +473,11 @@ def _validate_admission_evidence(value: object) -> dict[str, object]:
     for name in required_true:
         if value.get(name) is not True:
             raise T101IncompleteError(f"admission predicate failed: {name}")
-    report = validate_t101_bridge_report(value.get("bridge_report"), particle_count=2)
+    report = validate_t101_bridge_report(
+        value.get("bridge_report"),
+        particle_count=2,
+        expected_sampler_seed=expected_sampler_seed,
+    )
     return {
         "restore_exact_accepted_state": True,
         "public_projection_parity": True,
@@ -496,7 +520,10 @@ def select_t101_cohort(
             identity = _identity(candidate)
             digest = _selection_key(candidate)[0]
             try:
-                structural = _validate_admission_evidence(admit(candidate))
+                structural = _validate_admission_evidence(
+                    admit(candidate),
+                    expected_sampler_seed=derive_t101_sampler_seed(identity, 0),
+                )
             except T101IncompleteError as exc:
                 exclusion: dict[str, object] = {
                     "selection_identity": identity,
@@ -613,7 +640,9 @@ def validate_t101_selected_cohort(value: object) -> list[dict[str, object]]:
                         f"admitted structural predicate changed: {name}"
                     )
             report = validate_t101_bridge_report(
-                structural.get("admission_bridge_report"), particle_count=2
+                structural.get("admission_bridge_report"),
+                particle_count=2,
+                expected_sampler_seed=derive_t101_sampler_seed(identity, 0),
             )
             if structural.get("bridge_report_sha256") != _canonical_sha256(report):
                 raise T101IncompleteError("admission bridge evidence hash changed")
@@ -731,7 +760,9 @@ def validate_t101_insufficient_cohort(value: object) -> dict[str, object]:
                         f"admitted structural predicate changed: {name}"
                     )
             report = validate_t101_bridge_report(
-                structural.get("admission_bridge_report"), particle_count=2
+                structural.get("admission_bridge_report"),
+                particle_count=2,
+                expected_sampler_seed=derive_t101_sampler_seed(identity, 0),
             )
             if structural.get("bridge_report_sha256") != _canonical_sha256(report):
                 raise T101IncompleteError("admission bridge evidence hash changed")
@@ -931,10 +962,16 @@ def _prefix_metrics(
     return rows, means, best
 
 
-def analyze_t101_batch(value: object) -> dict[str, object]:
+def analyze_t101_batch(
+    value: object, *, expected_sampler_seed: int | None = None
+) -> dict[str, object]:
     """Analyze all nested prefixes of one exact state/replicate N=32 call."""
 
-    report = validate_t101_bridge_report(value, particle_count=32)
+    report = validate_t101_bridge_report(
+        value,
+        particle_count=32,
+        expected_sampler_seed=expected_sampler_seed,
+    )
     class_ids, values, partition = _class_particle_values(report)
     prefix: dict[int, tuple[list[dict[str, object]], dict[str, float], list[str]]] = {
         count: _prefix_metrics(class_ids, values, count) for count in T101_COUNTS
@@ -1007,12 +1044,15 @@ def validate_t101_canary_ladder(value: object) -> dict[str, object]:
     parsed: dict[int, dict[str, Any]] = {}
     elapsed: dict[int, float] = {}
     runtime: dict[int, dict[str, object]] = {}
+    expected_seed = derive_t101_sampler_seed(identity, 0)
     for count in T101_COUNTS:
         call = calls.get(str(count), calls.get(count))
         if not isinstance(call, Mapping):
             raise T101IncompleteError(f"canary direct N={count} call is missing")
         parsed[count] = validate_t101_bridge_report(
-            call.get("bridge_report"), particle_count=count
+            call.get("bridge_report"),
+            particle_count=count,
+            expected_sampler_seed=expected_seed,
         )
         elapsed[count] = _finite(call.get("wall_clock_time_s"), "canary wall time")
         if elapsed[count] < 0:
@@ -1037,7 +1077,6 @@ def validate_t101_canary_ladder(value: object) -> dict[str, object]:
             "single_worker_reason": call["single_worker_reason"],
         }
     reference = parsed[32]
-    expected_seed = derive_t101_sampler_seed(identity, 0)
     if reference["sampler_seed_input"] != expected_seed:
         raise T101IncompleteError("canary sampler seed differs from T101 derivation")
     for count in T101_COUNTS[:-1]:
@@ -1523,7 +1562,9 @@ def validate_t101_formal_rows(
         if row.get("failure_retry_status") != expected_status:
             raise T101IncompleteError("formal failure/retry status is incomplete")
         report = validate_t101_bridge_report(
-            row.get("bridge_report"), particle_count=32
+            row.get("bridge_report"),
+            particle_count=32,
+            expected_sampler_seed=job["sampler_seed"],
         )
         if report["sampler_seed_input"] != job["sampler_seed"]:
             raise T101IncompleteError("formal bridge sampler seed drifted")
@@ -1557,7 +1598,12 @@ def analyze_t101_formal(
     formal = validate_t101_formal_rows(rows, plan)
     analyses: list[dict[str, object]] = []
     for row in formal:
-        analysis = analyze_t101_batch(row["bridge_report"])
+        analysis = analyze_t101_batch(
+            row["bridge_report"],
+            expected_sampler_seed=derive_t101_sampler_seed(
+                row["selection_identity"], row["replicate_index"]
+            ),
+        )
         analyses.append(
             {
                 "selection_identity": row["selection_identity"],

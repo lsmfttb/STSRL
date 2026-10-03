@@ -616,7 +616,7 @@ def test_diagnostic_invokes_frozen_success_call_once_and_does_not_retain_report(
     monkeypatch.setattr(
         t101,
         "validate_t101_bridge_report",
-        lambda report, *, particle_count: (
+        lambda report, *, particle_count, expected_sampler_seed=None: (
             validator_inputs.append(report) or {**report, "accepted": True}
         ),
     )

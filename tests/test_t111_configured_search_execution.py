@@ -7,10 +7,18 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from test_native_public_projection import _projection_raw
 from test_t110_configuration_aware_mapping import _v2_report
 
 from sts_combat_rl.commands import t111_configured_search_execution as execution
 from sts_combat_rl.commands import t111_configured_search_execution_cli as execution_cli
+from sts_combat_rl.sim.native_public_projection import (
+    NATIVE_PUBLIC_PROJECTION_SCHEMA_ID,
+    parse_native_public_projection,
+)
+from sts_combat_rl.sim.t096_public_information_sampler import (
+    T096_PUBLIC_INFORMATION_SCHEMA_ID,
+)
 from sts_combat_rl.sim.t101_particle_convergence import derive_t101_sampler_seed
 from sts_combat_rl.sim.t105_native_stage_observability import (
     STAGES_IN_EXECUTION_ORDER,
@@ -32,12 +40,12 @@ _NATIVE = {
 def _two_particle_report(seed: int) -> dict[str, object]:
     report = _v2_report()
     first = report["particles"][0]
-    first["sampler_seed"] = seed
+    first["sampler_seed"] = 0xA5100000
     first["root_evaluation"]["simulations_requested"] = 400
     first["root_evaluation"]["root_visits"] = 800
     second = deepcopy(first)
     second["particle_index"] = 1
-    second["sampler_seed"] = seed
+    second["sampler_seed"] = 0xA5100001
     second["hidden_future_fingerprint"] = "second-fingerprint"
     report["search_simulations"] = 400
     report["sampler_seed_input"] = seed
@@ -46,15 +54,44 @@ def _two_particle_report(seed: int) -> dict[str, object]:
     return report
 
 
+def _adapter_actions(report):
+    return [
+        SimpleNamespace(
+            kind=action["kind"],
+            label=action["label"],
+            raw={
+                **{key: action[key] for key in ("scope", "idx1", "idx2", "idx3")},
+                "native_private": object(),
+            },
+        )
+        for action in report["anchor_ordered_public_legal_actions"]
+    ]
+
+
 class _FakeAdapter:
-    def __init__(self, report, *, bridge_exception=None, stage_trace=None):
+    def __init__(
+        self,
+        report,
+        *,
+        actions=None,
+        t096_projection=None,
+        bridge_exception=None,
+        stage_trace=None,
+    ):
         self.report = report
+        self.actions = _adapter_actions(report) if actions is None else actions
+        self.t096_projection = t096_projection
+        self.t096_calls = []
         self.bridge_exception = bridge_exception
         self.stage_trace = stage_trace
         self.bridge_calls = []
 
     def legal_actions(self, _restored):
-        return ["native action object"]
+        return self.actions
+
+    def t096_public_information_projection(self, restored):
+        self.t096_calls.append(restored)
+        return self.t096_projection
 
     def sample_hidden_future_particles_search(self, snapshot, **kwargs):
         self.bridge_calls.append((snapshot, kwargs))
@@ -71,29 +108,42 @@ def _runner(
     *,
     identity="A:fixture",
     report=None,
+    adapter_actions=None,
+    context_candidate_actions=None,
+    direct_t096_projection=None,
     bridge_exception=None,
     stage_trace=None,
+    on_bridge_call=None,
 ):
     seed = derive_t101_sampler_seed(identity, 0)
-    expected_actions = _two_particle_report(seed)["anchor_ordered_public_legal_actions"]
+    report = report or _two_particle_report(seed)
+    expected_actions = report["anchor_ordered_public_legal_actions"]
     expected_context = {
         "history": [],
         "candidate_actions": expected_actions,
         "input_state": "PLAYER_NORMAL",
     }
     restored = SimpleNamespace(raw=object())
-    projection = SimpleNamespace(
-        canonical_payload=json.dumps(
-            _two_particle_report(seed)["anchor_public_information_projection"]
-        )
-    )
+    # Keep a genuine T014 projection object whose canonical schema is
+    # intentionally different from the T096 bridge-anchor projection.
+    projection = parse_native_public_projection(_projection_raw())
     selected = SimpleNamespace(selection_identity=identity)
     canonical = SimpleNamespace(public_run_context=expected_context)
     adapter = _FakeAdapter(
-        report or _two_particle_report(seed),
+        report,
+        actions=adapter_actions,
+        t096_projection=(
+            deepcopy(report["anchor_public_information_projection"])
+            if direct_t096_projection is None
+            else direct_t096_projection
+        ),
         bridge_exception=bridge_exception,
         stage_trace=stage_trace,
     )
+    adapter.t014_projection = projection
+    actual_context = dict(expected_context)
+    if context_candidate_actions is not None:
+        actual_context["candidate_actions"] = context_candidate_actions
     restore_calls = []
 
     monkeypatch.setattr(
@@ -117,19 +167,20 @@ def _runner(
     monkeypatch.setattr(
         execution,
         "build_public_run_context",
-        lambda *_args, **_kwargs: expected_context,
+        lambda *_args, **_kwargs: actual_context,
     )
     runner = execution.T111NativeRecordRunner(
         adapter_factory=lambda: adapter,
         selected_records={identity: selected},
         canonical_records_by_stratum={"A": {identity: canonical}},
         native_identity=_NATIVE,
+        on_bridge_call=on_bridge_call,
     )
     record = {"selection_identity": identity, "cohort": "A"}
     return runner, record, adapter, restore_calls, restored
 
 
-def test_t111_runner_restores_checks_parity_and_makes_one_frozen_bridge_call(
+def test_t111_runner_keeps_t014_and_t096_projection_schemas_separate(
     monkeypatch,
 ):
     runner, record, adapter, restore_calls, restored = _runner(monkeypatch)
@@ -154,20 +205,121 @@ def test_t111_runner_restores_checks_parity_and_makes_one_frozen_bridge_call(
         "search_simulations": 400,
         "include_potions": False,
     }
+    assert (
+        execution._adapter_actions_as_public_identities(adapter.actions)
+        == result["bridge_report"]["anchor_ordered_public_legal_actions"]
+    )
+    t014_projection = json.loads(adapter.t014_projection.canonical_payload)
+    t096_anchor = result["bridge_report"]["anchor_public_information_projection"]
+    assert t014_projection["schema_id"] == NATIVE_PUBLIC_PROJECTION_SCHEMA_ID
+    assert t096_anchor["schema_id"] == T096_PUBLIC_INFORMATION_SCHEMA_ID
+    assert t014_projection["schema_id"] != t096_anchor["schema_id"]
+    assert adapter.t096_calls == [restored]
 
 
-@pytest.mark.parametrize("bad_seed_location", ["bridge", "particle0", "particle1"])
-def test_t111_runner_rejects_wrong_seed_returned_by_native_bridge(
-    monkeypatch, bad_seed_location
-):
+@pytest.mark.parametrize("drift", ["field", "action", "visibility"])
+def test_t111_runner_rejects_restored_t096_projection_drift(monkeypatch, drift):
+    report = _two_particle_report(derive_t101_sampler_seed("A:fixture", 0))
+    direct_projection = deepcopy(report["anchor_public_information_projection"])
+    if drift == "field":
+        direct_projection["floor_num"] += 1
+    elif drift == "action":
+        direct_projection["ordered_public_legal_actions"][0]["label"] = (
+            "different public action"
+        )
+    else:
+        direct_projection["visibility"]["enemy_intent"]["classification"] = "hidden"
+    runner, record, adapter, _restore_calls, restored = _runner(
+        monkeypatch,
+        report=report,
+        direct_t096_projection=direct_projection,
+    )
+
+    with pytest.raises(T111SupportExclusion) as error:
+        runner(record)
+
+    assert error.value.reason == "public_projection_parity_failure"
+    assert error.value.evidence["boundary"] == "bridge_to_restored_projection_parity"
+    assert adapter.t096_calls == [restored]
+    assert len(adapter.bridge_calls) == 1
+
+
+@pytest.mark.parametrize(
+    "drift",
+    ["ordinal", "kind", "idx", "label"],
+)
+def test_t111_runner_rejects_ordered_bridge_action_identity_drift(monkeypatch, drift):
+    report = _two_particle_report(derive_t101_sampler_seed("A:fixture", 0))
+    actions = _adapter_actions(report)
+    if drift == "ordinal":
+        actions[0], actions[1] = actions[1], actions[0]
+    elif drift == "kind":
+        actions[0] = SimpleNamespace(
+            kind="drifted-kind", label=actions[0].label, raw=actions[0].raw
+        )
+    elif drift == "idx":
+        raw = dict(actions[0].raw)
+        raw["idx1"] += 1
+        actions[0] = SimpleNamespace(
+            kind=actions[0].kind, label=actions[0].label, raw=raw
+        )
+    else:
+        actions[0] = SimpleNamespace(
+            kind=actions[0].kind,
+            label="drifted-label",
+            raw=actions[0].raw,
+        )
+    runner, record, adapter, _restore_calls, _restored = _runner(
+        monkeypatch, report=report, adapter_actions=actions
+    )
+
+    with pytest.raises(T111SupportExclusion) as error:
+        runner(record)
+
+    assert error.value.reason == "ordered_public_action_parity_failure"
+    assert (
+        error.value.evidence["boundary"] == "bridge_to_restored_ordered_action_parity"
+    )
+    assert (
+        error.value.evidence["structural_admission_predicates"][
+            "ordered_legal_action_parity"
+        ]
+        is False
+    )
+    assert len(adapter.bridge_calls) == 1
+
+
+def test_t111_t015_restored_context_candidate_parity_remains_strict(monkeypatch):
+    runner, record, adapter, _restore_calls, _restored = _runner(
+        monkeypatch,
+        context_candidate_actions=[{"availability": "available", "items": []}],
+    )
+
+    with pytest.raises(T111SupportExclusion) as error:
+        runner(record)
+
+    assert error.value.reason == "ordered_public_action_parity_failure"
+    assert error.value.evidence["boundary"] == "restored_ordered_action_parity"
+    assert adapter.bridge_calls == []
+
+
+def test_t111_runner_bridge_observer_counts_only_actual_bridge_invocations(monkeypatch):
+    observed = []
+    runner, record, adapter, _restore_calls, _restored = _runner(
+        monkeypatch, on_bridge_call=observed.append
+    )
+
+    runner(record)
+
+    assert observed == [record["selection_identity"]]
+    assert len(adapter.bridge_calls) == 1
+
+
+def test_t111_runner_rejects_wrong_bridge_input_seed_from_native_bridge(monkeypatch):
     identity = "A:fixture"
     seed = derive_t101_sampler_seed(identity, 0)
     report = _two_particle_report(seed)
-    if bad_seed_location == "bridge":
-        report["sampler_seed_input"] += 1
-    else:
-        index = 0 if bad_seed_location == "particle0" else 1
-        report["particles"][index]["sampler_seed"] += 1
+    report["sampler_seed_input"] += 1
     runner, record, adapter, _restore_calls, _restored = _runner(
         monkeypatch, identity=identity, report=report
     )
@@ -175,6 +327,24 @@ def test_t111_runner_rejects_wrong_seed_returned_by_native_bridge(
     with pytest.raises(T111SupportExclusion) as error:
         runner(record)
     assert error.value.reason == "v2_bridge_schema_or_classification_failure"
+    assert len(adapter.bridge_calls) == 1
+
+
+def test_t111_runner_accepts_valid_native_derived_particle_seed_metadata(monkeypatch):
+    identity = "A:fixture"
+    seed = derive_t101_sampler_seed(identity, 0)
+    report = _two_particle_report(seed)
+    runner, record, adapter, _restore_calls, _restored = _runner(
+        monkeypatch, identity=identity, report=report
+    )
+
+    result = runner(record)
+
+    assert result["bridge_report"]["sampler_seed_input"] == seed
+    assert [row["sampler_seed"] for row in result["bridge_report"]["particles"]] == [
+        0xA5100000,
+        0xA5100001,
+    ]
     assert len(adapter.bridge_calls) == 1
 
 

@@ -232,6 +232,19 @@ next diagnostic direction; that direction does not authorize a replay. See the
 and [task archive](tasks/ARCHIVE.md) for the terminal record and retention
 manifest identity.
 
+T112 repaired the sampler-seed contract and re-entered the same exact
+T101-ordered 413-candidate population under replicate 0, `particle_start=0`,
+N=2, unguided Search-v2@400, and `include_potions=false`. Its separately
+accepted one-call witness confirmed matching requested/observed sampler seed
+input and native-derived per-particle seed metadata. The corrected bounded
+cohort admitted 8/8/8 candidates in A/B/C after 27 attempts (9/8/10), with
+three searched-value-unavailable/non-finite/unvisited exclusions. The terminal
+is `CONFIGURED_SEARCH_DOMAIN_SUPPORT_RECOVERED`; the earlier attempt-3
+cross-schema projection exclusions were not reused. No N>2 run, convergence,
+native change, training, or promotion occurred. See the [T112 execution
+evidence](tasks/support/T112/implementation-and-execution.md) and [task
+archive](tasks/ARCHIVE.md) for exact artifact identities.
+
 The retained closed-route conclusions remain available through the task archive
 and contracts, including the earlier Oracle-guided Search, later-act reach,
 root-prior allocation, curriculum, value-target, and Non-Combat investigations.

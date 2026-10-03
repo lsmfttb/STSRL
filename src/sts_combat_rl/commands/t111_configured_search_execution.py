@@ -8,7 +8,6 @@ execution path after Maintainer exact-head/resource approval.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 
 from sts_combat_rl.commands.t085_native_execution import (
@@ -18,6 +17,9 @@ from sts_combat_rl.sim.public_run_context import (
     _validate_projection_candidate_parity,
     build_public_run_context,
     read_native_public_projection,
+)
+from sts_combat_rl.sim.t096_public_information_sampler import (
+    validate_public_information_projection,
 )
 from sts_combat_rl.sim.t101_particle_convergence import (
     T101_SEARCH_SIMULATIONS,
@@ -56,6 +58,50 @@ def _exception_type(exc: BaseException) -> str:
     return type(exc).__name__[:120]
 
 
+def _adapter_actions_as_public_identities(
+    actions: Sequence[object],
+) -> list[dict[str, object]]:
+    """Project adapter actions onto T096/T099's public ordered identity shape.
+
+    The T015 restored-context ``candidate_actions`` value is a richer wrapper
+    and is checked separately above.  For bridge parity, use only the public
+    action fields emitted by the adapter; in particular, never serialize its
+    ``raw`` payload wholesale because it may contain native/private objects.
+    """
+
+    identities: list[dict[str, object]] = []
+    for action in actions:
+        raw = getattr(action, "raw", None)
+        kind = getattr(action, "kind", None)
+        label = getattr(action, "label", None)
+        if not isinstance(raw, Mapping):
+            raise TypeError("adapter action public fields are unavailable")
+        scope = raw.get("scope")
+        indices = [raw.get(key) for key in ("idx1", "idx2", "idx3")]
+        if (
+            not isinstance(scope, str)
+            or not isinstance(kind, str)
+            or not isinstance(label, str)
+            or "bits=" in label
+            or any(
+                not isinstance(index, int) or isinstance(index, bool)
+                for index in indices
+            )
+        ):
+            raise TypeError("adapter action public identity is malformed")
+        identities.append(
+            {
+                "scope": scope,
+                "kind": kind,
+                "idx1": indices[0],
+                "idx2": indices[1],
+                "idx3": indices[2],
+                "label": label,
+            }
+        )
+    return identities
+
+
 class T111NativeRecordRunner:
     """Restore one retained T101 occurrence and perform exactly one T110 call.
 
@@ -70,6 +116,7 @@ class T111NativeRecordRunner:
         selected_records: Mapping[str, object],
         canonical_records_by_stratum: Mapping[str, Mapping[str, object]],
         native_identity: Mapping[str, object],
+        on_bridge_call: object | None = None,
     ) -> None:
         if not callable(adapter_factory) or not selected_records:
             raise ValueError("T111 native runner inputs are unavailable")
@@ -78,6 +125,9 @@ class T111NativeRecordRunner:
         self._adapter_factory = adapter_factory
         self._selected_records = selected_records
         self._canonical_records_by_stratum = canonical_records_by_stratum
+        if on_bridge_call is not None and not callable(on_bridge_call):
+            raise ValueError("bridge-call observer must be callable")
+        self._on_bridge_call = on_bridge_call
 
     @staticmethod
     def _predicates(**updates: bool | None) -> dict[str, bool | None]:
@@ -284,6 +334,25 @@ class T111NativeRecordRunner:
             )
         predicates["ordered_legal_action_parity"] = True
 
+        try:
+            t096_projection_method = getattr(
+                adapter, "t096_public_information_projection", None
+            )
+            if not callable(t096_projection_method):
+                raise TypeError("adapter lacks the T096 projection capability")
+            restored_t096_projection = validate_public_information_projection(
+                t096_projection_method(restored)
+            )
+        except Exception as exc:
+            failed_predicates = dict(predicates)
+            failed_predicates["public_projection_parity"] = False
+            raise self._exclude(
+                "public_projection_parity_failure",
+                boundary="restored_t096_projection_validation",
+                predicates=failed_predicates,
+                exc=exc,
+            ) from exc
+
         bridge = getattr(adapter, "sample_hidden_future_particles_search", None)
         if not callable(bridge):
             raise self._exclude(
@@ -292,6 +361,8 @@ class T111NativeRecordRunner:
                 predicates=predicates,
             )
         try:
+            if self._on_bridge_call is not None:
+                self._on_bridge_call(identity)
             raw_report = bridge(
                 restored,
                 sampler_seed=seed,
@@ -348,8 +419,20 @@ class T111NativeRecordRunner:
         predicates["search_edges_covered"] = True
         predicates["classification_and_partition_stable_across_particles"] = True
 
-        if raw_report.get("anchor_ordered_public_legal_actions") != actual_context.get(
-            "candidate_actions"
+        try:
+            adapter_public_actions = _adapter_actions_as_public_identities(actions)
+        except (TypeError, ValueError) as exc:
+            failed_predicates = dict(predicates)
+            failed_predicates["ordered_legal_action_parity"] = False
+            raise self._exclude(
+                "ordered_public_action_parity_failure",
+                boundary="bridge_to_restored_ordered_action_parity",
+                predicates=failed_predicates,
+                exc=exc,
+            ) from exc
+        if (
+            raw_report.get("anchor_ordered_public_legal_actions")
+            != adapter_public_actions
         ):
             failed_predicates = dict(predicates)
             failed_predicates["ordered_legal_action_parity"] = False
@@ -358,34 +441,15 @@ class T111NativeRecordRunner:
                 boundary="bridge_to_restored_ordered_action_parity",
                 predicates=failed_predicates,
             )
-        anchor_projection = raw_report.get("anchor_public_information_projection")
-        canonical_payload = getattr(projection, "canonical_payload", None)
-        if isinstance(canonical_payload, str):
-            try:
-                observed_projection = json.loads(canonical_payload)
-            except json.JSONDecodeError as exc:
-                failed_predicates = dict(predicates)
-                failed_predicates["public_projection_parity"] = False
-                raise self._exclude(
-                    "public_projection_parity_failure",
-                    boundary="bridge_to_restored_projection_parity",
-                    predicates=failed_predicates,
-                    exc=exc,
-                ) from exc
-            if observed_projection != anchor_projection:
-                failed_predicates = dict(predicates)
-                failed_predicates["public_projection_parity"] = False
-                raise self._exclude(
-                    "public_projection_parity_failure",
-                    boundary="bridge_to_restored_projection_parity",
-                    predicates=failed_predicates,
-                )
-        elif projection is not None:
+        if (
+            raw_report.get("anchor_public_information_projection")
+            != restored_t096_projection
+        ):
             failed_predicates = dict(predicates)
             failed_predicates["public_projection_parity"] = False
             raise self._exclude(
                 "public_projection_parity_failure",
-                boundary="native_projection_canonical_payload_unavailable",
+                boundary="bridge_to_restored_projection_parity",
                 predicates=failed_predicates,
             )
 
