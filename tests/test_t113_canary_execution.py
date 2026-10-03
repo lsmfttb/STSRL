@@ -230,6 +230,46 @@ def _run_fixture(tmp_path, monkeypatch):
     }
 
 
+def test_t113_t085_source_manifest_reference_accepts_byte_count(tmp_path):
+    manifest_path = tmp_path / "t085-source-generation-manifest.json"
+    manifest_path.write_bytes(b"T085 source manifest reference fixture\n")
+    reference = {
+        "path": str(manifest_path.resolve()),
+        "schema_id": command.T085_SOURCE_MANIFEST_SCHEMA_ID,
+        "sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "byte_count": manifest_path.stat().st_size,
+    }
+
+    checked, resolved = command._verify_t085_source_manifest_reference(reference)
+
+    assert resolved == manifest_path.resolve()
+    assert checked == reference
+    # Generic T113 artifact references remain size_bytes-based.
+    with pytest.raises(command.T113WorkflowError):
+        command._verify_reference(
+            reference, expected_schema=command.T085_SOURCE_MANIFEST_SCHEMA_ID
+        )
+
+
+@pytest.mark.parametrize("field", ["byte_count", "sha256"])
+def test_t113_t085_source_manifest_reference_rejects_changed_integrity(tmp_path, field):
+    manifest_path = tmp_path / f"t085-source-generation-manifest-{field}.json"
+    manifest_path.write_bytes(b"T085 source manifest reference fixture\n")
+    reference = {
+        "path": str(manifest_path.resolve()),
+        "schema_id": command.T085_SOURCE_MANIFEST_SCHEMA_ID,
+        "sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "byte_count": manifest_path.stat().st_size,
+    }
+    if field == "byte_count":
+        reference[field] += 1
+    else:
+        reference[field] = "0" * 64
+
+    with pytest.raises(T113CanaryWorkflowError):
+        command._verify_t085_source_manifest_reference(reference)
+
+
 def test_t113_readiness_is_non_authorizing_and_binds_exact_canary_rows(tmp_path):
     cohort = fixtures._fixed_cohort(fixtures._t112_cohort())
     binary_path = tmp_path / "native.bin"

@@ -20,7 +20,9 @@ from pathlib import Path
 
 from sts_combat_rl.commands import t088_canary
 from sts_combat_rl.commands.t085_native_execution import (
+    T085_SOURCE_MANIFEST_SCHEMA_ID,
     T085NativeExecutionError,
+    _t085_validate_path_reference,
     restore_t085_canonical_record,
 )
 from sts_combat_rl.commands.t113_configured_particle_convergence import (
@@ -98,6 +100,33 @@ def _verify_path_reference(
     raw: object, *, expected_schema: str | None = None
 ) -> tuple[dict[str, object], Path]:
     reference, path = _verify_reference(raw, expected_schema=expected_schema)
+    return reference, path
+
+
+def _verify_t085_source_manifest_reference(
+    raw: object,
+) -> tuple[dict[str, object], Path]:
+    """Verify the T085 byte_count reference without widening generic refs."""
+
+    if not isinstance(raw, Mapping):
+        raise T113CanaryWorkflowError(
+            "retained T085 source manifest reference is malformed"
+        )
+    raw_path = raw.get("path")
+    if not isinstance(raw_path, str) or not raw_path:
+        raise T113CanaryWorkflowError("retained T085 source manifest path is missing")
+    try:
+        resolved = _resolve_host_path(raw_path)
+        reference = _t085_validate_path_reference(
+            {**raw, "path": str(resolved)},
+            "T113 retained T085 source manifest",
+            expected_schema_id=T085_SOURCE_MANIFEST_SCHEMA_ID,
+        )
+    except (OSError, T085NativeExecutionError, T113WorkflowError) as exc:
+        raise T113CanaryWorkflowError(
+            "retained T085 source manifest schema, byte count, path, or hash changed"
+        ) from exc
+    path = Path(str(reference["path"]))
     return reference, path
 
 
@@ -548,7 +577,7 @@ def _load_t101_restore_inputs(
         reference = (
             source.get("source_manifest") if isinstance(source, Mapping) else None
         )
-        _, source_manifests[stratum] = _verify_path_reference(reference)
+        _, source_manifests[stratum] = _verify_t085_source_manifest_reference(reference)
     formal, gate, _provenance = t088_canary._admit_t088_canary_inputs_from_paths(
         implementation_head=implementation_head,
         t087_formal_path=roles["t087_formal"][1],
